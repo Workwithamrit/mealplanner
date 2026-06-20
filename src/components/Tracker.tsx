@@ -2,8 +2,9 @@
 
 import { useMemo } from 'react';
 import { BarChart3, History } from 'lucide-react';
-import { useMenuStore, useActivityStore } from '@/lib/stores/meal';
-import { actualMacros, sumMacros, DAYS_OF_WEEK, type Macros, type DailyMenu } from '@/types';
+import { useMenuStore, useActivityStore, dayOrSkeleton } from '@/lib/stores/meal';
+import { actualMacros, sumMacros, type Macros, type DailyMenu } from '@/types';
+import { weekDatesFrom, formatDayLabel, dayBadge } from '@/lib/date';
 import { cn } from '@/lib/utils';
 
 function dayMacros(day: DailyMenu): { planned: Macros; actual: Macros } {
@@ -17,11 +18,15 @@ function dayMacros(day: DailyMenu): { planned: Macros; actual: Macros } {
 const round = (n: number) => Math.round(n);
 
 export default function Tracker() {
-  const menu = useMenuStore((s) => s.menu);
+  const byDate = useMenuStore((s) => s.byDate);
+  const weekStart = useMenuStore((s) => s.weekStart);
   const entries = useActivityStore((s) => s.entries);
   const clear = useActivityStore((s) => s.clear);
 
-  const rows = useMemo(() => menu.map((d) => ({ day: d.day, ...dayMacros(d) })), [menu]);
+  const weekDates = useMemo(() => weekDatesFrom(weekStart), [weekStart]);
+  const menu = useMemo(() => weekDates.map((d) => dayOrSkeleton(byDate, d)), [weekDates, byDate]);
+
+  const rows = useMemo(() => menu.map((d) => ({ date: d.date, ...dayMacros(d) })), [menu]);
   const weekPlanned = useMemo(() => sumMacros(rows.map((r) => r.planned)), [rows]);
   const weekActual = useMemo(() => sumMacros(rows.map((r) => r.actual)), [rows]);
 
@@ -58,25 +63,31 @@ export default function Tracker() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.day} className="border-b border-slate-50 last:border-0">
-                  <td className="p-3 font-medium text-slate-700">{r.day}</td>
-                  {(['calories', 'protein', 'carbs', 'fat'] as const).map((k) => {
-                    const diff = round(r.actual[k]) - round(r.planned[k]);
-                    return (
-                      <td key={k} className="p-3 text-right tabular-nums">
-                        <span className="text-slate-800">{round(r.actual[k])}</span>
-                        <span className="text-slate-300"> / {round(r.planned[k])}</span>
-                        {diff !== 0 && (
-                          <span className={cn('ml-1 text-[10px]', diff > 0 ? 'text-amber-600' : 'text-sky-600')}>
-                            {diff > 0 ? '+' : ''}{diff}
-                          </span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+              {rows.map((r) => {
+                const badge = dayBadge(r.date);
+                return (
+                  <tr key={r.date} className="border-b border-slate-50 last:border-0">
+                    <td className="p-3 font-medium text-slate-700">
+                      {formatDayLabel(r.date)}
+                      {badge && <span className="ml-1.5 text-[10px] font-semibold uppercase text-emerald-600">{badge}</span>}
+                    </td>
+                    {(['calories', 'protein', 'carbs', 'fat'] as const).map((k) => {
+                      const diff = round(r.actual[k]) - round(r.planned[k]);
+                      return (
+                        <td key={k} className="p-3 text-right tabular-nums">
+                          <span className="text-slate-800">{round(r.actual[k])}</span>
+                          <span className="text-slate-300"> / {round(r.planned[k])}</span>
+                          {diff !== 0 && (
+                            <span className={cn('ml-1 text-[10px]', diff > 0 ? 'text-amber-600' : 'text-sky-600')}>
+                              {diff > 0 ? '+' : ''}{diff}
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

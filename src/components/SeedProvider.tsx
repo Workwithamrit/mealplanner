@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useDishStore, useMenuStore, useConfigStore } from '@/lib/stores/meal';
 import { SEED_DISHES } from '@/lib/seed-dishes';
-import { DEFAULT_SLOTS, type DayMeals } from '@/types';
+import { DEFAULT_SLOTS, type DailyMenu, type DayMeals } from '@/types';
 
 // Map legacy menu keys (meal names, used before slots had ids) → default slot ids.
 const LEGACY_KEY: Record<string, string> = {
@@ -12,21 +12,22 @@ const LEGACY_KEY: Record<string, string> = {
 
 function reconcileMenu() {
   const slotIds = new Set(useConfigStore.getState().slots.map((s) => s.id));
-  const menu = useMenuStore.getState().menu;
-  let changed = false;
-  const next = menu.map((d) => {
+  const byDate = useMenuStore.getState().byDate;
+  const updated: DailyMenu[] = [];
+  for (const d of Object.values(byDate)) {
     const meals: DayMeals = { ...d.meals };
+    let dayChanged = false;
     for (const k of Object.keys(meals)) {
       const target = LEGACY_KEY[k];
       if (!slotIds.has(k) && target && slotIds.has(target)) {
         meals[target] = [...(meals[target] ?? []), ...meals[k]];
         delete meals[k];
-        changed = true;
+        dayChanged = true;
       }
     }
-    return { ...d, meals };
-  });
-  if (changed) useMenuStore.getState().setMenu(next);
+    if (dayChanged) updated.push({ ...d, meals });
+  }
+  if (updated.length) useMenuStore.getState().setMenuForDates(updated);
   useMenuStore.getState().syncSlots();
 }
 

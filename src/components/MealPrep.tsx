@@ -2,14 +2,17 @@
 
 import { useMemo } from 'react';
 import { Clock, ChefHat } from 'lucide-react';
-import { useMenuStore } from '@/lib/stores/meal';
+import { useMenuStore, dayOrSkeleton } from '@/lib/stores/meal';
 import { buildPrepTasks } from '@/lib/meal-logic';
-import { DAYS_OF_WEEK } from '@/types';
+import { weekDatesFrom, formatDayLabel, dayBadge } from '@/lib/date';
 
 export default function MealPrep() {
-  const menu = useMenuStore((s) => s.menu);
+  const byDate = useMenuStore((s) => s.byDate);
+  const weekStart = useMenuStore((s) => s.weekStart);
+  const weekDates = useMemo(() => weekDatesFrom(weekStart), [weekStart]);
+  const menu = useMemo(() => weekDates.map((d) => dayOrSkeleton(byDate, d)), [weekDates, byDate]);
   const prep = useMemo(() => buildPrepTasks(menu), [menu]);
-  const total = Object.values(prep).reduce((n, list) => n + list.length, 0);
+  const total = weekDates.reduce((n, d) => n + (prep[d]?.length ?? 0), 0);
 
   return (
     <div className="space-y-6">
@@ -25,11 +28,15 @@ export default function MealPrep() {
         <p className="text-center text-slate-400 py-12">No advance prep needed yet. Regenerate or fill your week to see tasks.</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {DAYS_OF_WEEK.map((day) => {
-            const tasks = prep[day];
+          {weekDates.map((date) => {
+            const tasks = prep[date] ?? [];
+            const badge = dayBadge(date);
             return (
-              <div key={day} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-                <h3 className="font-display font-semibold text-emerald-800 border-b border-emerald-100 pb-2 mb-3">{day}</h3>
+              <div key={date} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+                <h3 className="font-display font-semibold text-emerald-800 border-b border-emerald-100 pb-2 mb-3 flex items-center gap-2">
+                  {formatDayLabel(date)}
+                  {badge && <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-500">{badge}</span>}
+                </h3>
                 {tasks.length === 0 ? (
                   <p className="text-xs text-slate-400 italic">Nothing to prep.</p>
                 ) : (

@@ -19,11 +19,12 @@ export default function DishBank() {
 
   const [filterDiet, setFilterDiet] = useState<DietFilter>('All');
   const [filterMeal, setFilterMeal] = useState<MealFilter>('All');
+  const [filterDessert, setFilterDessert] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const filtered = useMemo(
-    () => dishes.filter((d) => (filterDiet === 'All' || d.diet === filterDiet) && (filterMeal === 'All' || d.type === filterMeal)),
-    [dishes, filterDiet, filterMeal],
+    () => dishes.filter((d) => (filterDiet === 'All' || d.diet === filterDiet) && (filterMeal === 'All' || d.type === filterMeal) && (!filterDessert || d.isDessert)),
+    [dishes, filterDiet, filterMeal, filterDessert],
   );
 
   const recommendations = useMemo(() => buildRecommendations(dishes), [dishes]);
@@ -98,9 +99,13 @@ export default function DishBank() {
       )}
 
       {/* Filters (#9) */}
-      <div className="flex flex-wrap gap-4 bg-white p-4 rounded-xl border border-slate-200">
+      <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl border border-slate-200">
         <Filter label="Diet" value={filterDiet} onChange={(v) => setFilterDiet(v as DietFilter)} options={['All', 'Veg', 'Non-Veg']} />
         <Filter label="Meal" value={filterMeal} onChange={(v) => setFilterMeal(v as MealFilter)} options={['All', ...MEAL_TYPES]} />
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-600 min-h-12 px-1 cursor-pointer">
+          <input type="checkbox" checked={filterDessert} onChange={(e) => setFilterDessert(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
+          🍰 Dessert only
+        </label>
       </div>
 
       {filtered.length === 0 ? (
@@ -134,6 +139,7 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
   const [acc, setAcc] = useState(dish.accompaniments);
   const [type, setType] = useState<MealType>(dish.type);
   const [diet, setDiet] = useState<DietType>(dish.diet);
+  const [isDessert, setIsDessert] = useState(dish.isDessert ?? false);
 
   const save = () => {
     onUpdate(dish.id, {
@@ -141,6 +147,7 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
       accompaniments: acc.split(',').map((s) => s.trim()).filter(Boolean).join(', '),
       type,
       diet,
+      isDessert,
     });
     setEditing(false);
   };
@@ -191,6 +198,10 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
               <option value="Non-Veg">Non-Veg</option>
             </select>
           </div>
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-600 min-h-12 cursor-pointer">
+            <input type="checkbox" checked={isDessert} onChange={(e) => setIsDessert(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
+            🍰 Can be served as a dessert (combinable with any meal)
+          </label>
           <div className="flex gap-2 pt-1">
             <button onClick={save} className="flex items-center gap-1 text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700"><Check className="w-3 h-3" /> Save</button>
             <button onClick={() => setEditing(false)} className="flex items-center gap-1 text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded"><X className="w-3 h-3" /> Cancel</button>
@@ -208,6 +219,7 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
           <div className="flex flex-wrap gap-1.5 mt-2 text-[10px] font-medium uppercase tracking-wide">
             <span className="bg-white/70 text-slate-600 px-2 py-0.5 rounded-full">{dish.type}</span>
             <span className={cn('px-2 py-0.5 rounded-full', veg ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{dish.diet}</span>
+            {dish.isDessert && <span className="bg-pink-100 text-pink-700 px-2 py-0.5 rounded-full">🍰 Dessert</span>}
           </div>
           {dish.accompaniments && (
             <div className="text-xs text-slate-600 mt-2 flex flex-wrap gap-1">
@@ -282,6 +294,7 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
   const [diet, setDiet] = useState<DietType>('Veg');
   const [type, setType] = useState<MealType>('Lunch');
   const [accompaniments, setAccompaniments] = useState('');
+  const [isDessert, setIsDessert] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -294,6 +307,7 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
         onAdd({
           name: r.name, type: r.type, diet: r.diet, accompaniments: r.accompaniments || '',
           macros: r.macros, ingredients: r.ingredients || [], instructions: r.instructions || [], sourceUrl: r.sourceUrl,
+          isDessert,
         });
       } else {
         if (!name.trim()) return;
@@ -302,6 +316,7 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
           name: r.name || name.trim(), type, diet,
           accompaniments: (accompaniments.trim() || r.accompaniments) ?? '',
           macros: r.macros, ingredients: r.ingredients || [], instructions: r.instructions || [], sourceUrl: r.sourceUrl,
+          isDessert,
         });
       }
       onClose();
@@ -358,6 +373,11 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
             <input value={accompaniments} onChange={(e) => setAccompaniments(e.target.value)} placeholder="Accompaniments (e.g. Roti, Dal, Salad)" className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm" />
           </div>
         )}
+
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-600 min-h-12 mt-2 cursor-pointer">
+          <input type="checkbox" checked={isDessert} onChange={(e) => setIsDessert(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
+          🍰 Can be served as a dessert (combinable with any meal)
+        </label>
 
         {error && <p className="text-xs text-red-600 mt-3">{error}</p>}
 

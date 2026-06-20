@@ -69,6 +69,8 @@ export interface Dish {
   instructions: string[];
   sourceUrl?: string;
   createdAt: string;
+  /** Dessert is a tag, not an exclusive category — combinable with any meal slot (#5). */
+  isDessert?: boolean;
 }
 
 // How the planned dish actually played out (#6, #3). Undefined = assume eaten
@@ -87,6 +89,7 @@ export interface MealPlanDish {
   status?: MealStatus;
   actualName?: string;   // what was actually eaten (replacement / ordered / outside)
   actualMacros?: Macros; // actual nutrition, when known
+  isDessert?: boolean;   // copied from the source Dish at insertion time (#5)
 }
 
 /** Nutrition that actually counts for a planned dish (#7). */
@@ -108,8 +111,11 @@ export function sumMacros(list: Macros[]): Macros {
 // Weekly menu — `meals` is keyed by slot id so meal rows are fully configurable.
 export type DayMeals = Record<string, MealPlanDish[]>;
 
+// A day is addressed by its real calendar date (#3 — "yyyy-MM-dd"), not a
+// generic weekday label, so today/tomorrow can be read and edited directly
+// (e.g. from the OvO Today tile) and a plan made for any date sticks to it.
 export interface DailyMenu {
-  day: WeekDay;
+  date: string; // ISO yyyy-MM-dd
   diet: DietType;
   meals: DayMeals;
 }

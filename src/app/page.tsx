@@ -39,7 +39,6 @@ export default function Home() {
               <h1 className="font-display text-lg font-bold tracking-tight text-slate-800 leading-none truncate">
                 SwYam<span className="text-emerald-600"> Meal Planner</span>
               </h1>
-              <p className="text-[11px] text-slate-400 leading-none mt-0.5">Planning for Amrit, Swati, Akshit &amp; Agastya</p>
             </div>
           </div>
 

@@ -1,8 +1,9 @@
 import {
-  type Dish, type DailyMenu, type DayMeals, type MealPlanDish, type DietType, type MealType, type WeekDay,
-  DAYS_OF_WEEK,
+  type Dish, type DailyMenu, type DayMeals, type MealPlanDish, type DietType, type MealType, type Person, type Macros,
+  actualMacros, sumMacros, ZERO_MACROS,
 } from '@/types';
-import { dishToPlanInstance, useConfigStore } from './stores/meal';
+import { dishToPlanInstance, useConfigStore, peopleForSlot } from './stores/meal';
+import { addDaysISO } from './date';
 
 // ─── helpers ───
 const rand = <T,>(arr: T[]): T | undefined => arr[Math.floor(Math.random() * arr.length)];
@@ -26,10 +27,10 @@ function pickFresh(candidates: Dish[], used: Set<string>): Dish | undefined {
 /** Fill one slot according to its category's rule. Returns the dish instances. */
 function fillSlot(
   category: MealType, diet: DietType, dishes: Dish[], used: Set<string>,
-  day: WeekDay, slotId: string, batter: BatterState,
+  date: string, slotId: string, batter: BatterState,
 ): MealPlanDish[] {
   const out: MealPlanDish[] = [];
-  const inst = (d?: Dish) => { if (d) out.push(dishToPlanInstance(d, day, slotId)); };
+  const inst = (d?: Dish) => { if (d) out.push(dishToPlanInstance(d, date, slotId)); };
 
   switch (category) {
     case 'Early Morning': {
@@ -64,32 +65,30 @@ function fillSlot(
   return out;
 }
 
-/** Build a full balanced week from the bank ONLY (#22), over the configured slots. */
+/** Build a full balanced run of days from the bank ONLY (#22), over the configured slots. */
 export function generateWeek(menu: DailyMenu[], dishes: Dish[]): DailyMenu[] {
   const slots = useConfigStore.getState().slots;
   const used = new Set<string>();
   const batter: BatterState = { left: 0 };
   return menu.map((day) => {
     const meals: DayMeals = {};
-    for (const slot of slots) meals[slot.id] = fillSlot(slot.category, day.diet, dishes, used, day.day, slot.id, batter);
+    for (const slot of slots) meals[slot.id] = fillSlot(slot.category, day.diet, dishes, used, day.date, slot.id, batter);
     return { ...day, meals };
   });
 }
 
 /** Regenerate a single day from the bank (used by the per-day diet popup, #21). */
-export function generateOneDay(day: WeekDay, diet: DietType, dishes: Dish[]): DayMeals {
+export function generateOneDay(date: string, diet: DietType, dishes: Dish[]): DayMeals {
   const slots = useConfigStore.getState().slots;
   const used = new Set<string>();
   const batter: BatterState = { left: 0 };
   const meals: DayMeals = {};
-  for (const slot of slots) meals[slot.id] = fillSlot(slot.category, diet, dishes, used, day, slot.id, batter);
+  for (const slot of slots) meals[slot.id] = fillSlot(slot.category, diet, dishes, used, date, slot.id, batter);
   return meals;
 }
 
 // ─── Prep schedule (#13, #14, #16) ───
-export interface PrepTask { day: WeekDay; timing: string; task: string }
-
-const prevDay = (day: WeekDay): WeekDay => DAYS_OF_WEEK[(DAYS_OF_WEEK.indexOf(day) + 6) % 7];
+export interface PrepTask { date: string; timing: string; task: string }
 
 function slotMaps() {
   const slots = useConfigStore.getState().slots;
@@ -98,10 +97,14 @@ function slotMaps() {
   return { label, category };
 }
 
-export function buildPrepTasks(menu: DailyMenu[]): Record<WeekDay, PrepTask[]> {
+export function buildPrepTasks(menu: DailyMenu[]): Record<string, PrepTask[]> {
   const { label, category } = slotMaps();
-  const out = Object.fromEntries(DAYS_OF_WEEK.map((d) => [d, [] as PrepTask[]])) as Record<WeekDay, PrepTask[]>;
-  const push = (t: PrepTask) => { if (!out[t.day].some((x) => x.task === t.task)) out[t.day].push(t); };
+  const out: Record<string, PrepTask[]> = {};
+  for (const d of menu) out[d.date] = [];
+  const push = (t: PrepTask) => {
+    if (!out[t.date]) out[t.date] = [];
+    if (!out[t.date].some((x) => x.task === t.task)) out[t.date].push(t);
+  };
 
   // Batter clubbing: schedule one soak→grind→ferment timeline at the start of a run.
   const breakfastSlot = useConfigStore.getState().slots.find((s) => s.category === 'Breakfast');
@@ -110,9 +113,9 @@ export function buildPrepTasks(menu: DailyMenu[]): Record<WeekDay, PrepTask[]> {
     for (let i = 0; i < menu.length; i++) {
       const name = batterByDay[i];
       if (!name || (i > 0 && batterByDay[i - 1] === name)) continue;
-      const start = prevDay(menu[i].day);
-      push({ day: start, timing: 'Previous morning', task: `Soak lentils + rice for ${name} batter` });
-      push({ day: start, timing: 'Previous night', task: `Grind ${name} batter and set to ferment overnight` });
+      const start = addDaysISO(menu[i].date, -1);
+      push({ date: start, timing: 'Previous morning', task: `Soak lentils + rice for ${name} batter` });
+      push({ date: start, timing: 'Previous night', task: `Grind ${name} batter and set to ferment overnight` });
     }
   }
 
@@ -122,15 +125,15 @@ export function buildPrepTasks(menu: DailyMenu[]): Record<WeekDay, PrepTask[]> {
       list.forEach((dish) => {
         const n = dish.name.toLowerCase();
         if (/\b(rajma|chole|chola|chana|kabuli|gughuni|makhni|makhani)\b/.test(n))
-          push({ day: prevDay(day.day), timing: 'Night before', task: `Soak beans/legumes overnight for ${dish.name} (${meal})` });
+          push({ date: addDaysISO(day.date, -1), timing: 'Night before', task: `Soak beans/legumes overnight for ${dish.name} (${meal})` });
         if (/\b(fish|prawn|chicken|mutton|tikka|keema)\b/.test(n))
-          push({ day: day.day, timing: '6–8 hrs before', task: `Marinate ${dish.name} ahead of ${meal}` });
+          push({ date: day.date, timing: '6–8 hrs before', task: `Marinate ${dish.name} ahead of ${meal}` });
         if (/\bpaneer\b/.test(n))
-          push({ day: day.day, timing: 'Morning of', task: `Set out / make fresh paneer for ${dish.name}` });
+          push({ date: day.date, timing: 'Morning of', task: `Set out / make fresh paneer for ${dish.name}` });
       });
       // Early-morning soak ritual, prepared the night before (#16).
       if (category.get(slotId) === 'Early Morning' && list.length)
-        push({ day: prevDay(day.day), timing: 'Night before', task: 'Soak almonds, walnuts and methi/seed water for the morning' });
+        push({ date: addDaysISO(day.date, -1), timing: 'Night before', task: 'Soak almonds, walnuts and methi/seed water for the morning' });
     });
   });
 
@@ -154,16 +157,17 @@ const PROCURE: { re: RegExp; item: string; by: string }[] = [
   { re: /\bsoya\b/i, item: 'Soya chunks', by: 'Keep stocked' },
 ];
 
-export function buildIngredientPlan(menu: DailyMenu[]): Record<WeekDay, IngredientLine[]> {
+export function buildIngredientPlan(menu: DailyMenu[]): Record<string, IngredientLine[]> {
   const { label } = slotMaps();
-  const out = Object.fromEntries(DAYS_OF_WEEK.map((d) => [d, [] as IngredientLine[]])) as Record<WeekDay, IngredientLine[]>;
+  const out: Record<string, IngredientLine[]> = {};
+  for (const d of menu) out[d.date] = [];
   menu.forEach((day) => {
     Object.entries(day.meals).forEach(([slotId, list]) => {
       const meal = label.get(slotId) ?? slotId;
       list.forEach((dish) => {
         PROCURE.forEach(({ re, item, by }) => {
-          if (re.test(dish.name) && !out[day.day].some((l) => l.item === item))
-            out[day.day].push({ item, forDish: dish.name, meal, availableBy: by });
+          if (re.test(dish.name) && !out[day.date].some((l) => l.item === item))
+            out[day.date].push({ item, forDish: dish.name, meal, availableBy: by });
         });
       });
     });
@@ -192,4 +196,16 @@ const SUGGESTIONS: Omit<Recommendation, 'reason'>[] = [
 export function buildRecommendations(dishes: Dish[]): Recommendation[] {
   const have = new Set(dishes.map((d) => d.name.toLowerCase()));
   return SUGGESTIONS.filter((s) => !have.has(s.name.toLowerCase())).map((s) => ({ ...s, reason: `Adds variety to your ${s.diet} ${s.meal} rotation` }));
+}
+
+/** Calories/protein/carbs/fat credited to each person for a day, based on who's in each slot (#1, #8). */
+export function dayPersonMacros(day: DailyMenu): Partial<Record<Person, Macros>> {
+  const totals: Partial<Record<Person, Macros>> = {};
+  for (const [slotId, list] of Object.entries(day.meals)) {
+    if (list.length === 0) continue;
+    const people = peopleForSlot(slotId, day.date);
+    const slotTotal = sumMacros(list.map(actualMacros));
+    for (const person of people) totals[person] = sumMacros([totals[person] ?? ZERO_MACROS, slotTotal]);
+  }
+  return totals;
 }

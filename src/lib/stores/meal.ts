@@ -5,8 +5,9 @@ import { indexedDBStorage } from './storage';
 import {
   type Dish, type DailyMenu, type MealType, type MealPlanDish, type DietType, type WeekDay,
   type Person, type MealStatus, type Macros, type MealSlot, type DayMeals,
-  DAYS_OF_WEEK, DEFAULT_DAY_DIET, DEFAULT_SLOTS, DEFAULT_PORTION_OPTIONS, defaultPeopleForCategory,
+  DEFAULT_DAY_DIET, DEFAULT_SLOTS, DEFAULT_PORTION_OPTIONS, defaultPeopleForCategory, emptyMeals,
 } from '@/types';
+import { weekdayOf, weekStartSunday, weekDatesFrom, todayISO } from '@/lib/date';
 
 /**
  * Persistence keys live under the `ovo-` namespace in the shared kv_store so the
@@ -127,9 +128,9 @@ export const useConfigStore = create<ConfigState>()(
   ),
 );
 
-/** Headcount for a slot on a given day, honouring config overrides (#10). */
-export function peopleForSlot(slotId: string, day: WeekDay): Person[] {
-  const weekend = day === 'Saturday' || day === 'Sunday';
+/** Headcount for a slot on a given calendar date, honouring config overrides (#10). */
+export function peopleForSlot(slotId: string, date: string): Person[] {
+  const weekend = weekdayOf(date) === 'Saturday' || weekdayOf(date) === 'Sunday';
   const cfg = useConfigStore.getState();
   const entry = cfg.peopleBySlot[slotId];
   if (entry) return weekend ? entry.weekend : entry.weekday;
@@ -167,105 +168,150 @@ export const useDishStore = create<DishState>()(
   ),
 );
 
-// ─── Weekly Plan Store ───
-function skeletonWeek(): DailyMenu[] {
+// ─── Weekly Plan Store — keyed by real calendar date (#3) ───
+function skeletonDay(date: string): DailyMenu {
   const slots = useConfigStore.getState().slots;
-  return DAYS_OF_WEEK.map((day) => ({
-    day, diet: DEFAULT_DAY_DIET[day],
-    meals: Object.fromEntries(slots.map((s) => [s.id, [] as MealPlanDish[]])),
-  }));
+  return { date, diet: DEFAULT_DAY_DIET[weekdayOf(date)], meals: emptyMeals(slots) };
 }
 
-export function dishToPlanInstance(dish: Dish, day: WeekDay, slotId: string): MealPlanDish {
+/** Pure read helper — never mutates the store; callers persist only on edit. */
+export function dayOrSkeleton(byDate: Record<string, DailyMenu>, date: string): DailyMenu {
+  return byDate[date] ?? skeletonDay(date);
+}
+
+export function dishToPlanInstance(dish: Dish, date: string, slotId: string): MealPlanDish {
   return {
-    id: `${day}-${slotId}-${uuid()}`,
+    id: `${date}-${slotId}-${uuid()}`,
     dishId: dish.id,
     name: dish.name,
     diet: dish.diet,
     accompaniments: dish.accompaniments,
     macros: dish.macros,
     consumed: false,
+    isDessert: dish.isDessert,
   };
 }
 
 interface MenuState {
-  menu: DailyMenu[];
-  setMenu: (m: DailyMenu[]) => void;
-  setDayDiet: (day: WeekDay, diet: DietType) => void;
-  setDayMeals: (day: WeekDay, meals: DayMeals) => void;
-  addDishToMeal: (day: WeekDay, slotId: string, dish: MealPlanDish) => void;
-  removeDishFromMeal: (day: WeekDay, slotId: string, instanceId: string) => void;
-  toggleConsumed: (day: WeekDay, slotId: string, instanceId: string) => void;
-  setPortion: (day: WeekDay, slotId: string, instanceId: string, portion: string) => void;
-  setStatus: (day: WeekDay, slotId: string, instanceId: string, status: MealStatus) => void;
-  setReplacement: (day: WeekDay, slotId: string, instanceId: string, name: string, macros: Macros) => void;
-  setExternal: (day: WeekDay, slotId: string, instanceId: string, kind: 'ordered' | 'outside', name: string, macros?: Macros) => void;
+  byDate: Record<string, DailyMenu>;
+  weekStart: string; // ISO Sunday of the week currently being viewed
+  setWeekStart: (iso: string) => void;
+  ensureDates: (dates: string[]) => void;
+  setMenuForDates: (entries: DailyMenu[]) => void;
+  setDayDiet: (date: string, diet: DietType) => void;
+  setDayMeals: (date: string, meals: DayMeals) => void;
+  addDishToMeal: (date: string, slotId: string, dish: MealPlanDish) => void;
+  /** Add the same dish to several slots on the same day in one action (#4). */
+  addDishToMeals: (date: string, slotIds: string[], dish: Dish) => void;
+  removeDishFromMeal: (date: string, slotId: string, instanceId: string) => void;
+  toggleConsumed: (date: string, slotId: string, instanceId: string) => void;
+  setPortion: (date: string, slotId: string, instanceId: string, portion: string) => void;
+  setStatus: (date: string, slotId: string, instanceId: string, status: MealStatus) => void;
+  setReplacement: (date: string, slotId: string, instanceId: string, name: string, macros: Macros) => void;
+  setExternal: (date: string, slotId: string, instanceId: string, kind: 'ordered' | 'outside', name: string, macros?: Macros) => void;
   syncSlots: () => void;
-  resetWeek: () => void;
+  resetWeek: (weekStartIso: string) => void;
 }
 
 function mapDish(
-  menu: DailyMenu[], day: WeekDay, slotId: string, id: string,
+  byDate: Record<string, DailyMenu>, date: string, slotId: string, id: string,
   fn: (d: MealPlanDish) => MealPlanDish,
-): DailyMenu[] {
-  return menu.map((d) =>
-    d.day === day
-      ? { ...d, meals: { ...d.meals, [slotId]: (d.meals[slotId] ?? []).map((x) => (x.id === id ? fn(x) : x)) } }
-      : d,
-  );
+): Record<string, DailyMenu> {
+  const day = dayOrSkeleton(byDate, date);
+  const meals: DayMeals = { ...day.meals, [slotId]: (day.meals[slotId] ?? []).map((x) => (x.id === id ? fn(x) : x)) };
+  return { ...byDate, [date]: { ...day, meals } };
 }
 
 export const useMenuStore = create<MenuState>()(
   persist(
     (set) => ({
-      menu: skeletonWeek(),
-      setMenu: (m) => set({ menu: m }),
-      setDayDiet: (day, diet) => set((s) => ({ menu: s.menu.map((d) => (d.day === day ? { ...d, diet } : d)) })),
-      setDayMeals: (day, meals) => set((s) => ({ menu: s.menu.map((d) => (d.day === day ? { ...d, meals } : d)) })),
-      addDishToMeal: (day, slotId, dish) => set((s) => ({
-        menu: s.menu.map((d) => (d.day === day ? { ...d, meals: { ...d.meals, [slotId]: [...(d.meals[slotId] ?? []), dish] } } : d)),
+      byDate: {},
+      weekStart: weekStartSunday(todayISO()),
+      setWeekStart: (iso) => set({ weekStart: iso }),
+      ensureDates: (dates) => set((s) => {
+        const byDate = { ...s.byDate };
+        let changed = false;
+        for (const d of dates) if (!byDate[d]) { byDate[d] = skeletonDay(d); changed = true; }
+        return changed ? { byDate } : s;
+      }),
+      setMenuForDates: (entries) => set((s) => {
+        const byDate = { ...s.byDate };
+        for (const e of entries) byDate[e.date] = e;
+        return { byDate };
+      }),
+      setDayDiet: (date, diet) => set((s) => ({ byDate: { ...s.byDate, [date]: { ...dayOrSkeleton(s.byDate, date), diet } } })),
+      setDayMeals: (date, meals) => set((s) => ({ byDate: { ...s.byDate, [date]: { ...dayOrSkeleton(s.byDate, date), meals } } })),
+      addDishToMeal: (date, slotId, dish) => set((s) => {
+        const day = dayOrSkeleton(s.byDate, date);
+        const meals: DayMeals = { ...day.meals, [slotId]: [...(day.meals[slotId] ?? []), dish] };
+        return { byDate: { ...s.byDate, [date]: { ...day, meals } } };
+      }),
+      addDishToMeals: (date, slotIds, dish) => set((s) => {
+        const day = dayOrSkeleton(s.byDate, date);
+        const meals: DayMeals = { ...day.meals };
+        for (const slotId of slotIds) meals[slotId] = [...(meals[slotId] ?? []), dishToPlanInstance(dish, date, slotId)];
+        return { byDate: { ...s.byDate, [date]: { ...day, meals } } };
+      }),
+      removeDishFromMeal: (date, slotId, instanceId) => set((s) => {
+        const day = dayOrSkeleton(s.byDate, date);
+        const meals: DayMeals = { ...day.meals, [slotId]: (day.meals[slotId] ?? []).filter((x) => x.id !== instanceId) };
+        return { byDate: { ...s.byDate, [date]: { ...day, meals } } };
+      }),
+      toggleConsumed: (date, slotId, instanceId) => set((s) => ({
+        byDate: mapDish(s.byDate, date, slotId, instanceId, (x) => ({ ...x, consumed: !x.consumed })),
       })),
-      removeDishFromMeal: (day, slotId, instanceId) => set((s) => ({
-        menu: s.menu.map((d) => (d.day === day ? { ...d, meals: { ...d.meals, [slotId]: (d.meals[slotId] ?? []).filter((x) => x.id !== instanceId) } } : d)),
+      setPortion: (date, slotId, instanceId, portion) => set((s) => ({
+        byDate: mapDish(s.byDate, date, slotId, instanceId, (x) => ({ ...x, portion })),
       })),
-      toggleConsumed: (day, slotId, instanceId) => set((s) => ({
-        menu: mapDish(s.menu, day, slotId, instanceId, (x) => ({ ...x, consumed: !x.consumed })),
-      })),
-      setPortion: (day, slotId, instanceId, portion) => set((s) => ({
-        menu: mapDish(s.menu, day, slotId, instanceId, (x) => ({ ...x, portion })),
-      })),
-      setStatus: (day, slotId, instanceId, status) => set((s) => ({
-        menu: mapDish(s.menu, day, slotId, instanceId, (x) => ({
+      setStatus: (date, slotId, instanceId, status) => set((s) => ({
+        byDate: mapDish(s.byDate, date, slotId, instanceId, (x) => ({
           ...x, status, consumed: status !== 'skipped',
           ...(status === 'planned' || status === 'skipped' ? { actualName: undefined, actualMacros: undefined } : {}),
         })),
       })),
-      setReplacement: (day, slotId, instanceId, name, macros) => set((s) => ({
-        menu: mapDish(s.menu, day, slotId, instanceId, (x) => ({ ...x, status: 'replaced', consumed: true, actualName: name, actualMacros: macros })),
+      setReplacement: (date, slotId, instanceId, name, macros) => set((s) => ({
+        byDate: mapDish(s.byDate, date, slotId, instanceId, (x) => ({ ...x, status: 'replaced', consumed: true, actualName: name, actualMacros: macros })),
       })),
-      setExternal: (day, slotId, instanceId, kind, name, macros) => set((s) => ({
-        menu: mapDish(s.menu, day, slotId, instanceId, (x) => ({ ...x, status: kind, consumed: true, actualName: name, actualMacros: macros })),
+      setExternal: (date, slotId, instanceId, kind, name, macros) => set((s) => ({
+        byDate: mapDish(s.byDate, date, slotId, instanceId, (x) => ({ ...x, status: kind, consumed: true, actualName: name, actualMacros: macros })),
       })),
-      // Reconcile every day's meal map with the current config slots.
+      // Reconcile every persisted day's meal map with the current config slots.
       syncSlots: () => set((s) => {
         const ids = useConfigStore.getState().slots.map((sl) => sl.id);
-        return {
-          menu: s.menu.map((d) => {
-            const meals: DayMeals = {};
-            for (const id of ids) meals[id] = d.meals[id] ?? [];
-            return { ...d, meals };
-          }),
-        };
+        const byDate = Object.fromEntries(Object.entries(s.byDate).map(([date, day]) => {
+          const meals: DayMeals = {};
+          for (const id of ids) meals[id] = day.meals[id] ?? [];
+          return [date, { ...day, meals }];
+        }));
+        return { byDate };
       }),
-      resetWeek: () => set({ menu: skeletonWeek() }),
+      resetWeek: (weekStartIso) => set((s) => {
+        const byDate = { ...s.byDate };
+        for (const d of weekDatesFrom(weekStartIso)) delete byDate[d];
+        return { byDate };
+      }),
     }),
     {
       name: PLAN_KEY,
       storage: indexedDBStorage,
+      // Heals partial/legacy persisted shapes, including the pre-#3 weekday-array format.
       merge: (persisted, current) => {
-        const p = persisted as Partial<MenuState> | undefined;
-        if (!p?.menu || !Array.isArray(p.menu) || p.menu.length !== 7) return current;
-        return { ...current, ...p };
+        const p = persisted as { byDate?: Record<string, DailyMenu>; weekStart?: string; menu?: { day: WeekDay; diet: DietType; meals: DayMeals }[] } | undefined;
+        if (p?.byDate && typeof p.byDate === 'object') {
+          return { ...current, ...p, byDate: p.byDate, weekStart: p.weekStart || current.weekStart };
+        }
+        if (Array.isArray(p?.menu) && p.menu.length > 0 && p.menu[0]?.day) {
+          // Legacy weekday-keyed array → pin onto the current real Sun–Sat week.
+          const weekStart = weekStartSunday(todayISO());
+          const dates = weekDatesFrom(weekStart);
+          const byDate: Record<string, DailyMenu> = {};
+          p.menu!.forEach((old, i) => {
+            const date = dates.find((d) => weekdayOf(d) === old.day) ?? dates[i % 7];
+            byDate[date] = { date, diet: old.diet, meals: old.meals };
+          });
+          return { ...current, byDate, weekStart };
+        }
+        return current;
       },
     },
   ),

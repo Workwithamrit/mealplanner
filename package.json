@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
+    "date-fns": "^4.4.0",
     "idb-keyval": "^6.2.5",
     "lucide-react": "^0.546.0",
     "next": "16.2.9",

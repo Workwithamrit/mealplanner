@@ -2,14 +2,17 @@
 
 import { useMemo } from 'react';
 import { ShoppingCart, AlarmClock } from 'lucide-react';
-import { useMenuStore } from '@/lib/stores/meal';
+import { useMenuStore, dayOrSkeleton } from '@/lib/stores/meal';
 import { buildIngredientPlan } from '@/lib/meal-logic';
-import { DAYS_OF_WEEK } from '@/types';
+import { weekDatesFrom, formatDayLabel, dayBadge } from '@/lib/date';
 
 export default function Ingredients() {
-  const menu = useMenuStore((s) => s.menu);
+  const byDate = useMenuStore((s) => s.byDate);
+  const weekStart = useMenuStore((s) => s.weekStart);
+  const weekDates = useMemo(() => weekDatesFrom(weekStart), [weekStart]);
+  const menu = useMemo(() => weekDates.map((d) => dayOrSkeleton(byDate, d)), [weekDates, byDate]);
   const plan = useMemo(() => buildIngredientPlan(menu), [menu]);
-  const total = Object.values(plan).reduce((n, list) => n + list.length, 0);
+  const total = weekDates.reduce((n, d) => n + (plan[d]?.length ?? 0), 0);
 
   return (
     <div className="space-y-6">
@@ -25,12 +28,16 @@ export default function Ingredients() {
         <p className="text-center text-slate-400 py-12">No special ingredients flagged yet. Fill your week to generate this list.</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {DAYS_OF_WEEK.map((day) => {
-            const lines = plan[day];
+          {weekDates.map((date) => {
+            const lines = plan[date] ?? [];
             if (lines.length === 0) return null;
+            const badge = dayBadge(date);
             return (
-              <div key={day} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-                <h3 className="font-display font-semibold text-emerald-800 border-b border-emerald-100 pb-2 mb-3">{day}</h3>
+              <div key={date} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+                <h3 className="font-display font-semibold text-emerald-800 border-b border-emerald-100 pb-2 mb-3 flex items-center gap-2">
+                  {formatDayLabel(date)}
+                  {badge && <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-500">{badge}</span>}
+                </h3>
                 <ul className="space-y-3">
                   {lines.map((l, i) => (
                     <li key={i} className="text-sm">
