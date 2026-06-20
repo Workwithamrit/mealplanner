@@ -273,15 +273,14 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
           <button onClick={() => { setMode('name'); setError(''); }} className={cn('flex-1 py-1.5 text-sm font-medium rounded-md', mode === 'name' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500')}>
             From name
           </button>
-          <button onClick={() => { setMode('link'); setError(''); }} title="Video parsing arrives in a later build" className={cn('flex-1 py-1.5 text-sm font-medium rounded-md', mode === 'link' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-400')}>
-            From video <span className="text-[10px] align-top">soon</span>
+          <button onClick={() => { setMode('link'); setError(''); }} className={cn('flex-1 py-1.5 text-sm font-medium rounded-md', mode === 'link' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500')}>
+            From video
           </button>
         </div>
 
         {mode === 'link' ? (
           <div className="space-y-3">
-            <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2">Video parsing (YouTube/Shorts via Gemini, Instagram via caption) lands in a later build. For now, add by name — Claude fills in the calories &amp; macros.</p>
-            <p className="text-sm text-slate-500">You can still paste a link; it’ll be saved as the source.</p>
+            <p className="text-sm text-slate-500">Paste a <strong>YouTube</strong> video or Shorts link — Gemini watches it and summarises the recipe (steps, ingredients, calories &amp; macros). Instagram isn’t fetchable by AI, so paste its caption below.</p>
             <div className="relative">
               <Link2 className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://youtube.com/shorts/…" className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm" />
@@ -289,6 +288,7 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
             {(needsTranscript || /instagram/i.test(url)) && (
               <textarea value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Paste the Instagram caption / transcript here…" rows={3} className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm" />
             )}
+            <p className="text-[11px] text-slate-400">Tip: public YouTube links work best. Private/age-restricted videos can’t be read.</p>
           </div>
         ) : (
           <div className="space-y-3">
