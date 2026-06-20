@@ -44,6 +44,35 @@ export interface Dish {
   createdAt: string;
 }
 
+// ─── People & app users (#8, #9, #10) ───
+export const ADULTS = ['Amrit', 'Swati'] as const;
+export const KIDS = ['Akshit', 'Agastya'] as const;
+export const PEOPLE = [...ADULTS, ...KIDS] as const;
+export type Person = (typeof PEOPLE)[number];
+
+// Both adults operate the app; Swati is the primary user.
+export const APP_USERS: Person[] = ['Swati', 'Amrit'];
+
+/**
+ * Who a given meal is planned for. Adults always; kids join Dinner on weekdays
+ * and all three main meals at the weekend (#10). Portions are then adjusted by
+ * the user.
+ */
+export function peopleForMeal(day: WeekDay, meal: MealType): Person[] {
+  const weekend = day === 'Saturday' || day === 'Sunday';
+  const kidMeals: MealType[] = weekend ? ['Breakfast', 'Lunch', 'Dinner'] : ['Dinner'];
+  return kidMeals.includes(meal) ? [...PEOPLE] : [...ADULTS];
+}
+
+export const PORTION_SUGGESTIONS = [
+  '1 bowl', '½ bowl', '1 cup', '1 plate', '1 glass',
+  '2 Roti', '3 Roti', '5 Chapati', '1 katori', '2 pieces',
+];
+
+// How the planned dish actually played out (#6). Undefined = assume eaten as
+// planned (no input needed).
+export type MealStatus = 'planned' | 'skipped' | 'replaced';
+
 // A dish instance placed into the weekly plan (decoupled from the bank so a
 // plan entry survives edits/deletes of the bank dish).
 export interface MealPlanDish {
@@ -52,8 +81,26 @@ export interface MealPlanDish {
   name: string;
   diet: DietType;
   accompaniments: string;
-  macros: Macros;
-  consumed: boolean;
+  macros: Macros;        // proposed / planned nutrition
+  portion?: string;      // e.g. "1 bowl", "5 Chapati" (#5)
+  consumed: boolean;     // legacy quick "had it" flag
+  status?: MealStatus;   // #6
+  actualName?: string;   // when replaced, what was eaten instead
+  actualMacros?: Macros; // actual nutrition when replaced
+}
+
+/** Nutrition that actually counts for a planned dish (#7). */
+export function actualMacros(d: MealPlanDish): Macros {
+  if (d.status === 'skipped') return ZERO_MACROS;
+  if (d.status === 'replaced' && d.actualMacros) return d.actualMacros;
+  return d.macros; // default: assumed eaten as planned
+}
+
+export function sumMacros(list: Macros[]): Macros {
+  return list.reduce(
+    (a, b) => ({ calories: a.calories + b.calories, protein: a.protein + b.protein, carbs: a.carbs + b.carbs, fat: a.fat + b.fat }),
+    { calories: 0, protein: 0, carbs: 0, fat: 0 },
+  );
 }
 
 export type DayMeals = Record<MealType, MealPlanDish[]>;

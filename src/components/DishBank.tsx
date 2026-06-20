@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import {
   Plus, Trash2, Pencil, Check, X, Link2, Loader2, Sparkles, Lightbulb,
 } from 'lucide-react';
-import { useDishStore } from '@/lib/stores/meal';
+import { useDishStore, logActivity } from '@/lib/stores/meal';
 import { buildRecommendations } from '@/lib/meal-logic';
 import { parseLink, generateDishByName } from '@/lib/ai';
 import { SEED_DISHES } from '@/lib/seed-dishes';
@@ -28,15 +28,25 @@ export default function DishBank() {
 
   const recommendations = useMemo(() => buildRecommendations(dishes), [dishes]);
 
+  // Logged wrappers so every bank change is attributed to the current user (#9).
+  const addDishLogged: AddDishFn = (d) => {
+    const created = addDish(d);
+    logActivity('Added dish to bank', created.name);
+    return created;
+  };
+  const updateDishLogged = (id: string, u: Partial<Dish>) => {
+    updateDish(id, u);
+    logActivity('Edited dish', u.name ?? dishes.find((x) => x.id === id)?.name ?? id);
+  };
+  const removeDishLogged = (id: string) => {
+    logActivity('Removed dish', dishes.find((x) => x.id === id)?.name ?? id);
+    removeDish(id);
+  };
+
   const acceptRecommendation = (r: ReturnType<typeof buildRecommendations>[number]) => {
-    addDish({
-      name: r.name,
-      type: r.meal,
-      diet: r.diet,
-      accompaniments: r.accompaniments,
-      macros: { ...ZERO_MACROS },
-      ingredients: [],
-      instructions: [],
+    addDishLogged({
+      name: r.name, type: r.meal, diet: r.diet, accompaniments: r.accompaniments,
+      macros: { ...ZERO_MACROS }, ingredients: [], instructions: [],
     });
   };
 
@@ -97,11 +107,11 @@ export default function DishBank() {
         <p className="text-center text-slate-400 py-12">No dishes match these filters.</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((d) => <DishCard key={d.id} dish={d} onUpdate={updateDish} onRemove={removeDish} />)}
+          {filtered.map((d) => <DishCard key={d.id} dish={d} onUpdate={updateDishLogged} onRemove={removeDishLogged} />)}
         </div>
       )}
 
-      {modalOpen && <AddDishModal onClose={() => setModalOpen(false)} onAdd={addDish} />}
+      {modalOpen && <AddDishModal onClose={() => setModalOpen(false)} onAdd={addDishLogged} />}
     </div>
   );
 }
@@ -211,7 +221,7 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
 type AddDishFn = (d: Omit<Dish, 'id' | 'createdAt'>) => Dish;
 
 function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishFn }) {
-  const [mode, setMode] = useState<'link' | 'name'>('link');
+  const [mode, setMode] = useState<'link' | 'name'>('name');
   const [url, setUrl] = useState('');
   const [transcript, setTranscript] = useState('');
   const [needsTranscript, setNeedsTranscript] = useState(false);
@@ -260,16 +270,18 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
         </div>
 
         <div className="flex bg-slate-100 rounded-lg p-1 mb-4">
-          {(['link', 'name'] as const).map((mTab) => (
-            <button key={mTab} onClick={() => { setMode(mTab); setError(''); }} className={cn('flex-1 py-1.5 text-sm font-medium rounded-md', mode === mTab ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500')}>
-              {mTab === 'link' ? 'From video link' : 'From name'}
-            </button>
-          ))}
+          <button onClick={() => { setMode('name'); setError(''); }} className={cn('flex-1 py-1.5 text-sm font-medium rounded-md', mode === 'name' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500')}>
+            From name
+          </button>
+          <button onClick={() => { setMode('link'); setError(''); }} title="Video parsing arrives in a later build" className={cn('flex-1 py-1.5 text-sm font-medium rounded-md', mode === 'link' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-400')}>
+            From video <span className="text-[10px] align-top">soon</span>
+          </button>
         </div>
 
         {mode === 'link' ? (
           <div className="space-y-3">
-            <p className="text-sm text-slate-500">Paste a YouTube video or Shorts link — Gemini watches it and extracts the recipe. (Instagram needs the caption pasted below.)</p>
+            <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2">Video parsing (YouTube/Shorts via Gemini, Instagram via caption) lands in a later build. For now, add by name — Claude fills in the calories &amp; macros.</p>
+            <p className="text-sm text-slate-500">You can still paste a link; it’ll be saved as the source.</p>
             <div className="relative">
               <Link2 className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://youtube.com/shorts/…" className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm" />
