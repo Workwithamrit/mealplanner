@@ -1,63 +1,20 @@
 import {
-  type Dish, type DailyMenu, type DayMeals, type DietType, type MealType, type WeekDay,
-  DAYS_OF_WEEK, emptyMeals,
+  type Dish, type DailyMenu, type DayMeals, type MealPlanDish, type DietType, type MealType, type WeekDay,
+  DAYS_OF_WEEK,
 } from '@/types';
-import { dishToPlanInstance } from './stores/meal';
+import { dishToPlanInstance, useConfigStore } from './stores/meal';
 
 // ─── helpers ───
 const rand = <T,>(arr: T[]): T | undefined => arr[Math.floor(Math.random() * arr.length)];
+const pool = (dishes: Dish[], cat: MealType, diet?: DietType): Dish[] =>
+  dishes.filter((d) => d.type === cat && (!diet || d.diet === diet));
+const SIDE_RE = /fry|bhindi|brinjal|parwal|kundru|poi|cabbage/i;
 
-function pool(dishes: Dish[], type: MealType, diet?: DietType): Dish[] {
-  return dishes.filter((d) => d.type === type && (!diet || d.diet === diet));
-}
-
-/** Dishes whose name implies a fermented batter shared across multiple mornings. */
 export function isBatterDish(name: string): boolean {
   return /\b(idli|dosa|uttapam|appam)\b/i.test(name);
 }
 
-/**
- * Build a full balanced week from the bank ONLY (requirement #22), respecting
- * each day's Veg/Non-Veg setting. Dosa/Idli batter is clubbed across up to 3
- * consecutive breakfasts (#14). Early Morning always carries the soaked
- * nuts + seed-water ritual (#16); Snacks slot is filled for the kids (#15).
- */
-export function generateWeek(menu: DailyMenu[], dishes: Dish[]): DailyMenu[] {
-  const usedMains = new Set<string>();
-  let batterDish: Dish | undefined;
-  let batterRunsLeft = 0;
-
-  return menu.map((day) => {
-    const meals = generateDay(day.day, day.diet, dishes, usedMains, () => {
-      // breakfast picker with batter clubbing
-      if (batterRunsLeft > 0 && batterDish) {
-        batterRunsLeft -= 1;
-        return batterDish;
-      }
-      const bfast = pickFresh(pool(dishes, 'Breakfast', day.diet === 'Veg' ? 'Veg' : undefined), usedMains)
-        ?? rand(pool(dishes, 'Breakfast', 'Veg'));
-      if (bfast && isBatterDish(bfast.name)) {
-        batterDish = bfast;
-        batterRunsLeft = 2; // this morning + next two = 3 total
-      } else {
-        batterDish = undefined;
-        batterRunsLeft = 0;
-      }
-      return bfast;
-    });
-    return { ...day, meals };
-  });
-}
-
-/** Regenerate a single day from the bank (used by the per-day diet popup, #21). */
-export function generateOneDay(day: WeekDay, diet: DietType, dishes: Dish[]): DayMeals {
-  const used = new Set<string>();
-  return generateDay(day, diet, dishes, used, () => {
-    const bf = pickFresh(pool(dishes, 'Breakfast', diet === 'Veg' ? 'Veg' : undefined), used)
-      ?? rand(pool(dishes, 'Breakfast', 'Veg'));
-    return bf;
-  });
-}
+interface BatterState { dish?: Dish; left: number }
 
 function pickFresh(candidates: Dish[], used: Set<string>): Dish | undefined {
   const fresh = candidates.filter((d) => !used.has(d.id));
@@ -66,112 +23,122 @@ function pickFresh(candidates: Dish[], used: Set<string>): Dish | undefined {
   return chosen;
 }
 
-function generateDay(
-  day: WeekDay,
-  diet: DietType,
-  dishes: Dish[],
-  usedMains: Set<string>,
-  pickBreakfast: () => Dish | undefined,
-): DayMeals {
-  const meals = emptyMeals();
-  const add = (meal: MealType, dish?: Dish) => {
-    if (dish) meals[meal].push(dishToPlanInstance(dish, day, meal));
-  };
+/** Fill one slot according to its category's rule. Returns the dish instances. */
+function fillSlot(
+  category: MealType, diet: DietType, dishes: Dish[], used: Set<string>,
+  day: WeekDay, slotId: string, batter: BatterState,
+): MealPlanDish[] {
+  const out: MealPlanDish[] = [];
+  const inst = (d?: Dish) => { if (d) out.push(dishToPlanInstance(d, day, slotId)); };
 
-  // Early Morning — default ritual: soaked nuts + a seed/methi water.
-  const nuts = dishes.find((d) => /almond|walnut/i.test(d.name) && d.type === 'Early Morning');
-  const water = rand(pool(dishes, 'Early Morning').filter((d) => !/almond|walnut/i.test(d.name)));
-  add('Early Morning', nuts);
-  add('Early Morning', water);
-
-  // Breakfast (batter-clubbed via the injected picker).
-  add('Breakfast', pickBreakfast());
-
-  // Lunch — a main + a veg side (multiple dishes per meal, #18).
-  if (diet === 'Non-Veg') {
-    add('Lunch', pickFresh(pool(dishes, 'Lunch', 'Non-Veg'), usedMains));
-  } else {
-    add('Lunch', pickFresh(pool(dishes, 'Lunch', 'Veg'), usedMains));
+  switch (category) {
+    case 'Early Morning': {
+      const nuts = dishes.find((d) => /almond|walnut/i.test(d.name) && d.type === 'Early Morning');
+      const water = rand(pool(dishes, 'Early Morning').filter((d) => !/almond|walnut/i.test(d.name)));
+      inst(nuts); inst(water);
+      break;
+    }
+    case 'Breakfast': {
+      let bf: Dish | undefined;
+      if (batter.left > 0 && batter.dish) { batter.left -= 1; bf = batter.dish; }
+      else {
+        bf = pickFresh(pool(dishes, 'Breakfast', diet === 'Veg' ? 'Veg' : undefined), used) ?? rand(pool(dishes, 'Breakfast', 'Veg'));
+        if (bf && isBatterDish(bf.name)) { batter.dish = bf; batter.left = 2; } // this + next two = 3
+        else { batter.dish = undefined; batter.left = 0; }
+      }
+      inst(bf);
+      break;
+    }
+    case 'Lunch': {
+      inst(diet === 'Non-Veg' ? pickFresh(pool(dishes, 'Lunch', 'Non-Veg'), used) : pickFresh(pool(dishes, 'Lunch', 'Veg'), used));
+      inst(pickFresh(pool(dishes, 'Lunch', 'Veg').filter((d) => SIDE_RE.test(d.name)), used));
+      break;
+    }
+    case 'Snack':
+      inst(pickFresh(pool(dishes, 'Snack', 'Veg'), used));
+      break;
+    case 'Dinner':
+      inst(pickFresh(pool(dishes, 'Dinner', 'Veg'), used));
+      break;
   }
-  const side = pickFresh(
-    pool(dishes, 'Lunch', 'Veg').filter((d) => /fry|bhindi|brinjal|parwal|kundru|poi|cabbage/i.test(d.name)),
-    usedMains,
-  );
-  add('Lunch', side);
+  return out;
+}
 
-  // Snack — kids' daytime slot.
-  add('Snack', pickFresh(pool(dishes, 'Snack', 'Veg'), usedMains));
+/** Build a full balanced week from the bank ONLY (#22), over the configured slots. */
+export function generateWeek(menu: DailyMenu[], dishes: Dish[]): DailyMenu[] {
+  const slots = useConfigStore.getState().slots;
+  const used = new Set<string>();
+  const batter: BatterState = { left: 0 };
+  return menu.map((day) => {
+    const meals: DayMeals = {};
+    for (const slot of slots) meals[slot.id] = fillSlot(slot.category, day.diet, dishes, used, day.day, slot.id, batter);
+    return { ...day, meals };
+  });
+}
 
-  // Dinner — one main; on a Non-Veg day keep dinner veg if lunch was non-veg.
-  add('Dinner', pickFresh(pool(dishes, 'Dinner', 'Veg'), usedMains));
-
+/** Regenerate a single day from the bank (used by the per-day diet popup, #21). */
+export function generateOneDay(day: WeekDay, diet: DietType, dishes: Dish[]): DayMeals {
+  const slots = useConfigStore.getState().slots;
+  const used = new Set<string>();
+  const batter: BatterState = { left: 0 };
+  const meals: DayMeals = {};
+  for (const slot of slots) meals[slot.id] = fillSlot(slot.category, diet, dishes, used, day, slot.id, batter);
   return meals;
 }
 
 // ─── Prep schedule (#13, #14, #16) ───
-export interface PrepTask {
-  day: WeekDay;
-  timing: string;
-  task: string;
+export interface PrepTask { day: WeekDay; timing: string; task: string }
+
+const prevDay = (day: WeekDay): WeekDay => DAYS_OF_WEEK[(DAYS_OF_WEEK.indexOf(day) + 6) % 7];
+
+function slotMaps() {
+  const slots = useConfigStore.getState().slots;
+  const label = new Map(slots.map((s) => [s.id, s.label]));
+  const category = new Map(slots.map((s) => [s.id, s.category]));
+  return { label, category };
 }
 
-const prevDay = (day: WeekDay): WeekDay => {
-  const i = DAYS_OF_WEEK.indexOf(day);
-  return DAYS_OF_WEEK[(i + 6) % 7];
-};
-
 export function buildPrepTasks(menu: DailyMenu[]): Record<WeekDay, PrepTask[]> {
+  const { label, category } = slotMaps();
   const out = Object.fromEntries(DAYS_OF_WEEK.map((d) => [d, [] as PrepTask[]])) as Record<WeekDay, PrepTask[]>;
-  const push = (t: PrepTask) => {
-    if (!out[t.day].some((x) => x.task === t.task)) out[t.day].push(t);
-  };
+  const push = (t: PrepTask) => { if (!out[t.day].some((x) => x.task === t.task)) out[t.day].push(t); };
 
-  // Batter clubbing: find consecutive runs of the same batter breakfast and
-  // schedule a single soak→grind→ferment timeline before the run starts.
-  const batterByDay = menu.map((d) => {
-    const bf = d.meals.Breakfast.find((x) => isBatterDish(x.name));
-    return bf?.name ?? null;
-  });
-  for (let i = 0; i < menu.length; i++) {
-    const name = batterByDay[i];
-    if (!name) continue;
-    if (i > 0 && batterByDay[i - 1] === name) continue; // mid-run, already scheduled
-    const start = prevDay(menu[i].day);
-    push({ day: start, timing: 'Previous morning', task: `Soak lentils + rice for ${name} batter` });
-    push({ day: start, timing: 'Previous night', task: `Grind ${name} batter and set to ferment overnight` });
+  // Batter clubbing: schedule one soak→grind→ferment timeline at the start of a run.
+  const breakfastSlot = useConfigStore.getState().slots.find((s) => s.category === 'Breakfast');
+  if (breakfastSlot) {
+    const batterByDay = menu.map((d) => (d.meals[breakfastSlot.id] ?? []).find((x) => isBatterDish(x.name))?.name ?? null);
+    for (let i = 0; i < menu.length; i++) {
+      const name = batterByDay[i];
+      if (!name || (i > 0 && batterByDay[i - 1] === name)) continue;
+      const start = prevDay(menu[i].day);
+      push({ day: start, timing: 'Previous morning', task: `Soak lentils + rice for ${name} batter` });
+      push({ day: start, timing: 'Previous night', task: `Grind ${name} batter and set to ferment overnight` });
+    }
   }
 
   menu.forEach((day) => {
-    Object.entries(day.meals).forEach(([meal, list]) => {
+    Object.entries(day.meals).forEach(([slotId, list]) => {
+      const meal = label.get(slotId) ?? slotId;
       list.forEach((dish) => {
         const n = dish.name.toLowerCase();
-        if (/\b(rajma|chole|chola|chana|kabuli|gughuni|makhni|makhani)\b/.test(n)) {
+        if (/\b(rajma|chole|chola|chana|kabuli|gughuni|makhni|makhani)\b/.test(n))
           push({ day: prevDay(day.day), timing: 'Night before', task: `Soak beans/legumes overnight for ${dish.name} (${meal})` });
-        }
-        if (/\b(fish|prawn|chicken|mutton|tikka|keema)\b/.test(n)) {
+        if (/\b(fish|prawn|chicken|mutton|tikka|keema)\b/.test(n))
           push({ day: day.day, timing: '6–8 hrs before', task: `Marinate ${dish.name} ahead of ${meal}` });
-        }
-        if (/\bpaneer\b/.test(n)) {
+        if (/\bpaneer\b/.test(n))
           push({ day: day.day, timing: 'Morning of', task: `Set out / make fresh paneer for ${dish.name}` });
-        }
       });
+      // Early-morning soak ritual, prepared the night before (#16).
+      if (category.get(slotId) === 'Early Morning' && list.length)
+        push({ day: prevDay(day.day), timing: 'Night before', task: 'Soak almonds, walnuts and methi/seed water for the morning' });
     });
-    // Early-morning soak ritual prepared the night before (#16).
-    if (day.meals['Early Morning'].length) {
-      push({ day: prevDay(day.day), timing: 'Night before', task: 'Soak almonds, walnuts and methi/seed water for the morning' });
-    }
   });
 
   return out;
 }
 
 // ─── Ingredient procurement plan (#13) ───
-export interface IngredientLine {
-  item: string;
-  forDish: string;
-  meal: MealType;
-  availableBy: string;
-}
+export interface IngredientLine { item: string; forDish: string; meal: string; availableBy: string }
 
 const PROCURE: { re: RegExp; item: string; by: string }[] = [
   { re: /\bfish\b/i, item: 'Fresh fish', by: 'Buy fresh, 6–8 hrs before the meal' },
@@ -188,14 +155,15 @@ const PROCURE: { re: RegExp; item: string; by: string }[] = [
 ];
 
 export function buildIngredientPlan(menu: DailyMenu[]): Record<WeekDay, IngredientLine[]> {
+  const { label } = slotMaps();
   const out = Object.fromEntries(DAYS_OF_WEEK.map((d) => [d, [] as IngredientLine[]])) as Record<WeekDay, IngredientLine[]>;
   menu.forEach((day) => {
-    Object.entries(day.meals).forEach(([meal, list]) => {
+    Object.entries(day.meals).forEach(([slotId, list]) => {
+      const meal = label.get(slotId) ?? slotId;
       list.forEach((dish) => {
         PROCURE.forEach(({ re, item, by }) => {
-          if (re.test(dish.name) && !out[day.day].some((l) => l.item === item)) {
-            out[day.day].push({ item, forDish: dish.name, meal: meal as MealType, availableBy: by });
-          }
+          if (re.test(dish.name) && !out[day.day].some((l) => l.item === item))
+            out[day.day].push({ item, forDish: dish.name, meal, availableBy: by });
         });
       });
     });
@@ -204,19 +172,8 @@ export function buildIngredientPlan(menu: DailyMenu[]): Record<WeekDay, Ingredie
 }
 
 // ─── Dish-bank-driven recommendations (#8) ───
-export interface Recommendation {
-  meal: MealType;
-  diet: DietType;
-  name: string;
-  accompaniments: string;
-  reason: string;
-}
+export interface Recommendation { meal: MealType; diet: DietType; name: string; accompaniments: string; reason: string }
 
-/**
- * Suggest dishes (with accompaniments) the user could add to the bank but
- * hasn't yet — a small curated set per meal/diet. Accepting one adds it to the
- * bank. Only suggests names not already present.
- */
 const SUGGESTIONS: Omit<Recommendation, 'reason'>[] = [
   { meal: 'Breakfast', diet: 'Veg', name: 'Vegetable Vermicelli Upma', accompaniments: 'Coconut Chutney' },
   { meal: 'Breakfast', diet: 'Veg', name: 'Sprouted Moong Dosa', accompaniments: 'Tomato Chutney' },
@@ -234,8 +191,5 @@ const SUGGESTIONS: Omit<Recommendation, 'reason'>[] = [
 
 export function buildRecommendations(dishes: Dish[]): Recommendation[] {
   const have = new Set(dishes.map((d) => d.name.toLowerCase()));
-  return SUGGESTIONS.filter((s) => !have.has(s.name.toLowerCase())).map((s) => ({
-    ...s,
-    reason: `Adds variety to your ${s.diet} ${s.meal} rotation`,
-  }));
+  return SUGGESTIONS.filter((s) => !have.has(s.name.toLowerCase())).map((s) => ({ ...s, reason: `Adds variety to your ${s.diet} ${s.meal} rotation` }));
 }

@@ -30,8 +30,9 @@ export async function POST(req: NextRequest) {
 
   try {
     const data = await claudeJSON({
-      system: 'You are an Indian-home-cooking nutritionist. Output a single recipe as JSON only.',
-      user: `Create a realistic recipe for "${name}". ${hints}\nUse typical Indian home-kitchen ingredients and portions. ${RECIPE_JSON_SPEC}`,
+      system: 'You are an Indian-home-cooking nutritionist who specialises in HEALTHY, LOW-OIL home cooking. Output a single recipe as JSON only.',
+      user: `Create a realistic, healthy, LOW-OIL home version of "${name}". ${hints}
+Guidelines: minimise oil/ghee (prefer 1–2 tsp, sautéing/steaming/air-frying/roasting over deep-frying), reduce cream/sugar, keep it nutritious and family-friendly, and reflect the lighter cooking in the calorie/macro estimate. Use typical Indian home-kitchen ingredients and portions. ${RECIPE_JSON_SPEC}`,
     });
     return Response.json(data);
   } catch (e) {

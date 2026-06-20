@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { CalendarDays, BookOpen, Clock, ShoppingCart, UtensilsCrossed, BarChart3, UserCircle2 } from 'lucide-react';
+import { CalendarDays, BookOpen, Clock, ShoppingCart, UtensilsCrossed, BarChart3, UserCircle2, SlidersHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useProfileStore } from '@/lib/stores/meal';
 import { APP_USERS, type Person } from '@/types';
@@ -10,8 +10,9 @@ import DishBank from '@/components/DishBank';
 import MealPrep from '@/components/MealPrep';
 import Ingredients from '@/components/Ingredients';
 import Tracker from '@/components/Tracker';
+import Settings from '@/components/Settings';
 
-type Tab = 'menu' | 'bank' | 'prep' | 'ingredients' | 'tracker';
+type Tab = 'menu' | 'bank' | 'prep' | 'ingredients' | 'tracker' | 'settings';
 
 const TABS: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: 'menu', label: 'Weekly Menu', icon: CalendarDays },
@@ -19,6 +20,7 @@ const TABS: { id: Tab; label: string; icon: typeof CalendarDays }[] = [
   { id: 'tracker', label: 'Tracker', icon: BarChart3 },
   { id: 'prep', label: 'Meal Prep', icon: Clock },
   { id: 'ingredients', label: 'Ingredients', icon: ShoppingCart },
+  { id: 'settings', label: 'Configurator', icon: SlidersHorizontal },
 ];
 
 export default function Home() {
@@ -78,6 +80,7 @@ export default function Home() {
         {tab === 'tracker' && <Tracker />}
         {tab === 'prep' && <MealPrep />}
         {tab === 'ingredients' && <Ingredients />}
+        {tab === 'settings' && <Settings />}
       </main>
     </div>
   );

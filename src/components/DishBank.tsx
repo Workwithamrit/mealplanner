@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import {
-  Plus, Trash2, Pencil, Check, X, Link2, Loader2, Sparkles, Lightbulb,
+  Plus, Trash2, Pencil, Check, X, Link2, Loader2, Sparkles, Lightbulb, Youtube, Leaf,
 } from 'lucide-react';
 import { useDishStore, logActivity } from '@/lib/stores/meal';
 import { buildRecommendations } from '@/lib/meal-logic';
@@ -145,6 +145,37 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
     setEditing(false);
   };
 
+  // Per-dish enrichment (#1): healthy low-oil recipe via Claude, or from a video.
+  const [enrichBusy, setEnrichBusy] = useState<'recipe' | 'video' | null>(null);
+  const [showVideo, setShowVideo] = useState(false);
+  const [videoUrl, setVideoUrl] = useState('');
+  const [enrichErr, setEnrichErr] = useState('');
+
+  const applyRecipe = (r: { ingredients?: string[]; instructions?: string[]; macros?: Dish['macros']; accompaniments?: string; sourceUrl?: string }) => {
+    onUpdate(dish.id, {
+      ingredients: r.ingredients?.length ? r.ingredients : dish.ingredients,
+      instructions: r.instructions?.length ? r.instructions : dish.instructions,
+      macros: r.macros ?? dish.macros,
+      accompaniments: dish.accompaniments || r.accompaniments || '',
+      sourceUrl: r.sourceUrl || dish.sourceUrl,
+    });
+  };
+
+  const genHealthy = async () => {
+    setEnrichBusy('recipe'); setEnrichErr('');
+    try { applyRecipe(await generateDishByName({ name: dish.name, diet: dish.diet, type: dish.type, accompaniments: dish.accompaniments })); }
+    catch (e) { setEnrichErr(e instanceof Error ? e.message : 'Failed'); }
+    finally { setEnrichBusy(null); }
+  };
+
+  const fetchVideo = async () => {
+    if (!videoUrl.trim()) return;
+    setEnrichBusy('video'); setEnrichErr('');
+    try { applyRecipe(await parseLink(videoUrl.trim())); setShowVideo(false); setVideoUrl(''); }
+    catch (e) { setEnrichErr(e instanceof Error ? e.message : 'Failed'); }
+    finally { setEnrichBusy(null); }
+  };
+
   return (
     <div className={cn('rounded-2xl border p-4 flex flex-col shadow-sm', veg ? 'bg-[var(--veg)] border-[var(--veg-border)]' : 'bg-[var(--nonveg)] border-[var(--nonveg-border)]')}>
       {editing ? (
@@ -212,6 +243,28 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
               </div>
             </details>
           )}
+
+          {/* Enrich (#1): healthy low-oil recipe details, or attach a video */}
+          <div className="mt-3 pt-2 border-t border-white/60">
+            <div className="flex flex-wrap gap-2">
+              <button onClick={genHealthy} disabled={!!enrichBusy} className="flex items-center gap-1 text-[11px] font-medium text-emerald-700 hover:text-emerald-800 disabled:opacity-50">
+                {enrichBusy === 'recipe' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Leaf className="w-3 h-3" />}
+                {dish.instructions.length ? 'Refresh healthy recipe' : 'Add healthy recipe'}
+              </button>
+              <button onClick={() => setShowVideo((v) => !v)} disabled={!!enrichBusy} className="flex items-center gap-1 text-[11px] font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50">
+                <Youtube className="w-3.5 h-3.5" /> From video
+              </button>
+            </div>
+            {showVideo && (
+              <div className="mt-2 flex gap-1.5">
+                <input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="YouTube/Shorts link" className="flex-1 px-2 py-1 text-xs border border-slate-300 rounded bg-white" />
+                <button onClick={fetchVideo} disabled={!videoUrl.trim() || !!enrichBusy} className="px-2 py-1 text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 rounded disabled:opacity-50">
+                  {enrichBusy === 'video' ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Fetch'}
+                </button>
+              </div>
+            )}
+            {enrichErr && <p className="text-[10px] text-red-600 mt-1">{enrichErr}</p>}
+          </div>
         </>
       )}
     </div>
