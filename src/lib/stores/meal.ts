@@ -148,6 +148,13 @@ interface DishState {
   resetTo: (dishes: Dish[]) => void;
 }
 
+/** Heals dishes persisted before the multi-type migration (`type`/`isDessert` → `types[]`). */
+function healDish(d: Dish & { type?: MealType; isDessert?: boolean }): Dish {
+  if (Array.isArray(d.types) && d.types.length > 0) return d;
+  const types: MealType[] = [...(d.type ? [d.type] : []), ...(d.isDessert && d.type !== 'Dessert' ? ['Dessert' as MealType] : [])];
+  return { ...d, types: types.length > 0 ? types : ['Lunch'] };
+}
+
 export const useDishStore = create<DishState>()(
   persist(
     (set, get) => ({
@@ -164,7 +171,54 @@ export const useDishStore = create<DishState>()(
       seed: (dishes) => { if (get().dishes.length === 0) set({ dishes }); },
       resetTo: (dishes) => set({ dishes }),
     }),
-    { name: DISHES_KEY, storage: indexedDBStorage },
+    {
+      name: DISHES_KEY,
+      storage: indexedDBStorage,
+      merge: (persisted, current) => {
+        const p = persisted as Partial<DishState> | undefined;
+        if (!p?.dishes) return current;
+        return { ...current, ...p, dishes: p.dishes.map(healDish) };
+      },
+    },
+  ),
+);
+
+// ─── Dismissed Dish Bank recommendations (local-only; not part of the shared kv_store) ───
+interface DismissedRecsState {
+  names: string[];
+  dismiss: (name: string) => void;
+}
+
+export const useDismissedRecsStore = create<DismissedRecsState>()(
+  persist(
+    (set) => ({
+      names: [],
+      dismiss: (name) => set((s) => (s.names.includes(name) ? s : { names: [...s.names, name] })),
+    }),
+    { name: 'swyam-dismissed-recs' },
+  ),
+);
+
+// ─── Meal Prep / Ingredients overrides (local-only; these screens are derived from the
+// plan each render, so edits/deletes are stored as a keyed overlay rather than in the data itself) ───
+interface PrepOverridesState {
+  dismissed: string[];
+  edits: Record<string, string>;
+  dismiss: (key: string) => void;
+  restore: (key: string) => void;
+  setEdit: (key: string, text: string) => void;
+}
+
+export const usePrepOverridesStore = create<PrepOverridesState>()(
+  persist(
+    (set) => ({
+      dismissed: [],
+      edits: {},
+      dismiss: (key) => set((s) => (s.dismissed.includes(key) ? s : { dismissed: [...s.dismissed, key] })),
+      restore: (key) => set((s) => ({ dismissed: s.dismissed.filter((k) => k !== key) })),
+      setEdit: (key, text) => set((s) => ({ edits: { ...s.edits, [key]: text } })),
+    }),
+    { name: 'swyam-prep-overrides' },
   ),
 );
 
@@ -188,7 +242,7 @@ export function dishToPlanInstance(dish: Dish, date: string, slotId: string): Me
     accompaniments: dish.accompaniments,
     macros: dish.macros,
     consumed: false,
-    isDessert: dish.isDessert,
+    types: dish.types,
   };
 }
 

@@ -15,14 +15,59 @@ function stripFences(text: string): string {
   return text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
 }
 
+/** Models sometimes emit a literal newline/tab inside a string value instead of escaping it,
+ *  which JSON.parse rejects as a "bad control character". Escape those, but only inside strings. */
+function escapeControlCharsInStrings(text: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) { out += ch; escaped = false; continue; }
+      if (ch === '\\') { out += ch; escaped = true; continue; }
+      if (ch === '"') { inString = false; out += ch; continue; }
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+      out += ch;
+    } else {
+      if (ch === '"') inString = true;
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Fixes the other common LLM JSON slip: a missing comma between two array/object
+ *  elements (usually across a newline), plus stray trailing commas. */
+function repairCommas(text: string): string {
+  return text
+    .replace(/,(\s*[\]}])/g, '$1')
+    .replace(/("|\]|\}|\d)(\s*\n\s*)("|\[|\{)/g, '$1,$3');
+}
+
 export function extractJSON<T = unknown>(text: string): T {
-  const cleaned = stripFences(text);
+  const cleaned = escapeControlCharsInStrings(stripFences(text));
   try {
     return JSON.parse(cleaned) as T;
+  } catch { /* fall through to repair attempts below */ }
+
+  // Narrow to the outermost JSON value, in case the model added prose before/after it.
+  const objStart = cleaned.indexOf('{');
+  const arrStart = cleaned.indexOf('[');
+  const candidates = [objStart, arrStart].filter((i) => i >= 0);
+  const start = candidates.length ? Math.min(...candidates) : -1;
+  const end = start === arrStart ? cleaned.lastIndexOf(']') : cleaned.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('Model did not return valid JSON');
+  const slice = cleaned.slice(start, end + 1);
+
+  try {
+    return JSON.parse(slice) as T;
+  } catch { /* fall through to comma repair */ }
+
+  try {
+    return JSON.parse(repairCommas(slice)) as T;
   } catch {
-    const a = cleaned.indexOf('{');
-    const b = cleaned.lastIndexOf('}');
-    if (a >= 0 && b > a) return JSON.parse(cleaned.slice(a, b + 1)) as T;
     throw new Error('Model did not return valid JSON');
   }
 }

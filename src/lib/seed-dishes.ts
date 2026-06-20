@@ -124,7 +124,7 @@ function slug(name: string): string {
 export const SEED_DISHES: Dish[] = SEED.map(([name, type, diet, accompaniments, macros]) => ({
   id: `seed-${slug(name)}`,
   name,
-  type,
+  types: [type],
   diet,
   accompaniments,
   macros,

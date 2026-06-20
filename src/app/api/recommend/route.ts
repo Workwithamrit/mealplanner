@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'ANTHROPIC_API_KEY not configured on the server.' }, { status: 503 });
   }
 
-  const slim = bank.map((d) => ({ name: d.name, type: d.type, diet: d.diet, accompaniments: d.accompaniments }));
+  const slim = bank.map((d) => ({ name: d.name, types: d.types, diet: d.diet, accompaniments: d.accompaniments }));
 
   try {
     const data = await claudeJSON({

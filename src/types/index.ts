@@ -2,11 +2,12 @@
 
 export type DietType = 'Veg' | 'Non-Veg';
 
-// The five semantic categories a DISH can belong to. These drive the generator
+// The semantic categories a DISH can belong to. These drive the generator
 // rules and the Dish Bank filter. Planner *rows* are configurable slots (below)
-// that each map to one of these categories.
-export type MealType = 'Early Morning' | 'Breakfast' | 'Lunch' | 'Snack' | 'Dinner';
-export const MEAL_TYPES: MealType[] = ['Early Morning', 'Breakfast', 'Lunch', 'Snack', 'Dinner'];
+// that each map to one of these categories. Dessert is a category like any
+// other (not a separate tag) — a dish can carry multiple categories at once.
+export type MealType = 'Early Morning' | 'Breakfast' | 'Lunch' | 'Snack' | 'Dinner' | 'Dessert';
+export const MEAL_TYPES: MealType[] = ['Early Morning', 'Breakfast', 'Lunch', 'Snack', 'Dinner', 'Dessert'];
 
 // ─── Configurable meal slots (#2 — fully custom meals) ───
 export interface MealSlot {
@@ -61,7 +62,8 @@ export const ZERO_MACROS: Macros = { calories: 0, protein: 0, carbs: 0, fat: 0 }
 export interface Dish {
   id: string;
   name: string;
-  type: MealType;
+  /** Multi-select: a dish can belong to more than one meal (e.g. Lunch + Dinner), incl. Dessert. */
+  types: MealType[];
   diet: DietType;
   accompaniments: string;
   macros: Macros;
@@ -69,8 +71,6 @@ export interface Dish {
   instructions: string[];
   sourceUrl?: string;
   createdAt: string;
-  /** Dessert is a tag, not an exclusive category — combinable with any meal slot (#5). */
-  isDessert?: boolean;
 }
 
 // How the planned dish actually played out (#6, #3). Undefined = assume eaten
@@ -89,7 +89,7 @@ export interface MealPlanDish {
   status?: MealStatus;
   actualName?: string;   // what was actually eaten (replacement / ordered / outside)
   actualMacros?: Macros; // actual nutrition, when known
-  isDessert?: boolean;   // copied from the source Dish at insertion time (#5)
+  types?: MealType[];    // copied from the source Dish at insertion time, for the 🍰 badge etc.
 }
 
 /** Nutrition that actually counts for a planned dish (#7). */

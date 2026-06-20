@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import {
-  Plus, Trash2, Pencil, Check, X, Link2, Loader2, Sparkles, Lightbulb, Youtube, Leaf,
+  Plus, Trash2, Pencil, Check, X, Link2, Loader2, Sparkles, Lightbulb, Youtube, Leaf, Search,
 } from 'lucide-react';
-import { useDishStore, logActivity } from '@/lib/stores/meal';
+import { useDishStore, useDismissedRecsStore, logActivity } from '@/lib/stores/meal';
 import { buildRecommendations } from '@/lib/meal-logic';
 import { parseLink, generateDishByName } from '@/lib/ai';
 import { SEED_DISHES } from '@/lib/seed-dishes';
@@ -16,18 +16,25 @@ type MealFilter = 'All' | MealType;
 
 export default function DishBank() {
   const { dishes, addDish, updateDish, removeDish, resetTo } = useDishStore();
+  const { names: dismissedRecs, dismiss: dismissRec } = useDismissedRecsStore();
 
+  const [search, setSearch] = useState('');
   const [filterDiet, setFilterDiet] = useState<DietFilter>('All');
   const [filterMeal, setFilterMeal] = useState<MealFilter>('All');
-  const [filterDessert, setFilterDessert] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
-  const filtered = useMemo(
-    () => dishes.filter((d) => (filterDiet === 'All' || d.diet === filterDiet) && (filterMeal === 'All' || d.type === filterMeal) && (!filterDessert || d.isDessert)),
-    [dishes, filterDiet, filterMeal, filterDessert],
-  );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return dishes.filter((d) =>
+      (filterDiet === 'All' || d.diet === filterDiet) &&
+      (filterMeal === 'All' || d.types.includes(filterMeal)) &&
+      (!q || d.name.toLowerCase().includes(q) || d.accompaniments.toLowerCase().includes(q)));
+  }, [dishes, filterDiet, filterMeal, search]);
 
-  const recommendations = useMemo(() => buildRecommendations(dishes), [dishes]);
+  const recommendations = useMemo(
+    () => buildRecommendations(dishes).filter((r) => !dismissedRecs.includes(r.name)),
+    [dishes, dismissedRecs],
+  );
 
   // Logged wrappers so every bank change is attributed to the current user (#9).
   const addDishLogged: AddDishFn = (d) => {
@@ -46,9 +53,10 @@ export default function DishBank() {
 
   const acceptRecommendation = (r: ReturnType<typeof buildRecommendations>[number]) => {
     addDishLogged({
-      name: r.name, type: r.meal, diet: r.diet, accompaniments: r.accompaniments,
+      name: r.name, types: [r.meal], diet: r.diet, accompaniments: r.accompaniments,
       macros: { ...ZERO_MACROS }, ingredients: [], instructions: [],
     });
+    dismissRec(r.name);
   };
 
   return (
@@ -80,8 +88,15 @@ export default function DishBank() {
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {recommendations.map((r) => (
-              <div key={r.name} className="bg-white rounded-lg border border-amber-100 p-3 flex flex-col">
-                <div className="flex items-center justify-between gap-2">
+              <div key={r.name} className="bg-white rounded-lg border border-amber-100 p-3 flex flex-col relative">
+                <button
+                  onClick={() => dismissRec(r.name)}
+                  title="Dismiss this recommendation"
+                  className="absolute top-2 right-2 text-slate-300 hover:text-slate-500"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+                <div className="flex items-center justify-between gap-2 pr-4">
                   <span className="font-medium text-sm text-slate-800">{r.name}</span>
                   <span className={cn('text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded', r.diet === 'Veg' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{r.diet}</span>
                 </div>
@@ -98,14 +113,22 @@ export default function DishBank() {
         </section>
       )}
 
-      {/* Filters (#9) */}
+      {/* Filters (#9, #18) */}
       <div className="flex flex-wrap items-end gap-4 bg-white p-4 rounded-xl border border-slate-200">
+        <div className="flex flex-col flex-1 min-w-[180px]">
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Search</label>
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search dishes or accompaniments…"
+              className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg bg-white"
+            />
+          </div>
+        </div>
         <Filter label="Diet" value={filterDiet} onChange={(v) => setFilterDiet(v as DietFilter)} options={['All', 'Veg', 'Non-Veg']} />
         <Filter label="Meal" value={filterMeal} onChange={(v) => setFilterMeal(v as MealFilter)} options={['All', ...MEAL_TYPES]} />
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-600 min-h-12 px-1 cursor-pointer">
-          <input type="checkbox" checked={filterDessert} onChange={(e) => setFilterDessert(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
-          🍰 Dessert only
-        </label>
       </div>
 
       {filtered.length === 0 ? (
@@ -137,17 +160,17 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(dish.name);
   const [acc, setAcc] = useState(dish.accompaniments);
-  const [type, setType] = useState<MealType>(dish.type);
+  const [types, setTypes] = useState<MealType[]>(dish.types);
   const [diet, setDiet] = useState<DietType>(dish.diet);
-  const [isDessert, setIsDessert] = useState(dish.isDessert ?? false);
+
+  const toggleType = (t: MealType) => setTypes((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
 
   const save = () => {
     onUpdate(dish.id, {
       name: name.trim() || dish.name,
       accompaniments: acc.split(',').map((s) => s.trim()).filter(Boolean).join(', '),
-      type,
+      types: types.length ? types : dish.types,
       diet,
-      isDessert,
     });
     setEditing(false);
   };
@@ -170,7 +193,7 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
 
   const genHealthy = async () => {
     setEnrichBusy('recipe'); setEnrichErr('');
-    try { applyRecipe(await generateDishByName({ name: dish.name, diet: dish.diet, type: dish.type, accompaniments: dish.accompaniments })); }
+    try { applyRecipe(await generateDishByName({ name: dish.name, diet: dish.diet, type: dish.types[0] ?? 'Lunch', accompaniments: dish.accompaniments })); }
     catch (e) { setEnrichErr(e instanceof Error ? e.message : 'Failed'); }
     finally { setEnrichBusy(null); }
   };
@@ -189,19 +212,21 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
         <div className="space-y-2">
           <input value={name} onChange={(e) => setName(e.target.value)} className="w-full px-2 py-1 text-sm border rounded bg-white" placeholder="Dish name" />
           <input value={acc} onChange={(e) => setAcc(e.target.value)} className="w-full px-2 py-1 text-sm border rounded bg-white" placeholder="Accompaniments, comma separated" />
-          <div className="flex gap-2">
-            <select value={type} onChange={(e) => setType(e.target.value as MealType)} className="flex-1 px-2 py-1 text-xs border rounded bg-white">
-              {MEAL_TYPES.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <select value={diet} onChange={(e) => setDiet(e.target.value as DietType)} className="flex-1 px-2 py-1 text-xs border rounded bg-white">
-              <option value="Veg">Veg</option>
-              <option value="Non-Veg">Non-Veg</option>
-            </select>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Meals (select all that apply)</div>
+            <div className="flex flex-wrap gap-2">
+              {MEAL_TYPES.map((m) => (
+                <label key={m} className={cn('flex items-center gap-1 text-xs px-2 py-1 rounded-full border cursor-pointer', types.includes(m) ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-white border-slate-300 text-slate-600')}>
+                  <input type="checkbox" checked={types.includes(m)} onChange={() => toggleType(m)} className="w-3 h-3 accent-emerald-600" />
+                  {m === 'Dessert' ? '🍰 Dessert' : m}
+                </label>
+              ))}
+            </div>
           </div>
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-600 min-h-12 cursor-pointer">
-            <input type="checkbox" checked={isDessert} onChange={(e) => setIsDessert(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
-            🍰 Can be served as a dessert (combinable with any meal)
-          </label>
+          <select value={diet} onChange={(e) => setDiet(e.target.value as DietType)} className="w-full px-2 py-1 text-xs border rounded bg-white">
+            <option value="Veg">Veg</option>
+            <option value="Non-Veg">Non-Veg</option>
+          </select>
           <div className="flex gap-2 pt-1">
             <button onClick={save} className="flex items-center gap-1 text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700"><Check className="w-3 h-3" /> Save</button>
             <button onClick={() => setEditing(false)} className="flex items-center gap-1 text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded"><X className="w-3 h-3" /> Cancel</button>
@@ -217,9 +242,12 @@ function DishCard({ dish, onUpdate, onRemove }: { dish: Dish; onUpdate: (id: str
             </div>
           </div>
           <div className="flex flex-wrap gap-1.5 mt-2 text-[10px] font-medium uppercase tracking-wide">
-            <span className="bg-white/70 text-slate-600 px-2 py-0.5 rounded-full">{dish.type}</span>
+            {dish.types.map((t) => (
+              <span key={t} className={cn('px-2 py-0.5 rounded-full', t === 'Dessert' ? 'bg-pink-100 text-pink-700' : 'bg-white/70 text-slate-600')}>
+                {t === 'Dessert' ? '🍰 Dessert' : t}
+              </span>
+            ))}
             <span className={cn('px-2 py-0.5 rounded-full', veg ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{dish.diet}</span>
-            {dish.isDessert && <span className="bg-pink-100 text-pink-700 px-2 py-0.5 rounded-full">🍰 Dessert</span>}
           </div>
           {dish.accompaniments && (
             <div className="text-xs text-slate-600 mt-2 flex flex-wrap gap-1">
@@ -292,11 +320,12 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
   const [needsTranscript, setNeedsTranscript] = useState(false);
   const [name, setName] = useState('');
   const [diet, setDiet] = useState<DietType>('Veg');
-  const [type, setType] = useState<MealType>('Lunch');
+  const [types, setTypes] = useState<MealType[]>(['Lunch']);
   const [accompaniments, setAccompaniments] = useState('');
-  const [isDessert, setIsDessert] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  const toggleType = (t: MealType) => setTypes((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
 
   const submit = async () => {
     setBusy(true); setError('');
@@ -305,18 +334,17 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
         if (!url.trim()) return;
         const r = await parseLink(url.trim(), transcript.trim() || undefined);
         onAdd({
-          name: r.name, type: r.type, diet: r.diet, accompaniments: r.accompaniments || '',
+          name: r.name, types: Array.from(new Set([...types, r.type])), diet: r.diet, accompaniments: r.accompaniments || '',
           macros: r.macros, ingredients: r.ingredients || [], instructions: r.instructions || [], sourceUrl: r.sourceUrl,
-          isDessert,
         });
       } else {
+        // Keep it light on add (#2): no AI call here — just the bare dish.
+        // "Add healthy recipe" on the card fetches the full recipe only when asked.
         if (!name.trim()) return;
-        const r = await generateDishByName({ name: name.trim(), diet, type, accompaniments: accompaniments.trim() });
         onAdd({
-          name: r.name || name.trim(), type, diet,
-          accompaniments: (accompaniments.trim() || r.accompaniments) ?? '',
-          macros: r.macros, ingredients: r.ingredients || [], instructions: r.instructions || [], sourceUrl: r.sourceUrl,
-          isDessert,
+          name: name.trim(), types: types.length ? types : ['Lunch'], diet,
+          accompaniments: accompaniments.trim(),
+          macros: { ...ZERO_MACROS }, ingredients: [], instructions: [],
         });
       }
       onClose();
@@ -360,24 +388,28 @@ function AddDishModal({ onClose, onAdd }: { onClose: () => void; onAdd: AddDishF
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-slate-500">Enter a dish name — Claude generates the steps, ingredients, macros and a source link.</p>
+            <p className="text-sm text-slate-500">Enter a dish name — it's added as a bare entry right away, light and ready. Use "Add healthy recipe" on the card later to fetch steps, ingredients &amp; macros from Claude.</p>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Lobia Masala" className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm" />
-            <div className="grid grid-cols-2 gap-3">
-              <select value={diet} onChange={(e) => setDiet(e.target.value as DietType)} className="px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm">
-                <option value="Veg">Veg</option><option value="Non-Veg">Non-Veg</option>
-              </select>
-              <select value={type} onChange={(e) => setType(e.target.value as MealType)} className="px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm">
-                {MEAL_TYPES.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
+            <select value={diet} onChange={(e) => setDiet(e.target.value as DietType)} className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm">
+              <option value="Veg">Veg</option><option value="Non-Veg">Non-Veg</option>
+            </select>
             <input value={accompaniments} onChange={(e) => setAccompaniments(e.target.value)} placeholder="Accompaniments (e.g. Roti, Dal, Salad)" className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm" />
           </div>
         )}
 
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-600 min-h-12 mt-2 cursor-pointer">
-          <input type="checkbox" checked={isDessert} onChange={(e) => setIsDessert(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
-          🍰 Can be served as a dessert (combinable with any meal)
-        </label>
+        <div className="mt-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">
+            Meals (select all that apply{mode === 'link' ? ' — Gemini/Claude will add its own guess too' : ''})
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {MEAL_TYPES.map((m) => (
+              <label key={m} className={cn('flex items-center gap-1 text-xs px-2 py-1 rounded-full border cursor-pointer', types.includes(m) ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-white border-slate-300 text-slate-600')}>
+                <input type="checkbox" checked={types.includes(m)} onChange={() => toggleType(m)} className="w-3 h-3 accent-emerald-600" />
+                {m === 'Dessert' ? '🍰 Dessert' : m}
+              </label>
+            ))}
+          </div>
+        </div>
 
         {error && <p className="text-xs text-red-600 mt-3">{error}</p>}
 

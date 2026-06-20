@@ -8,7 +8,7 @@ import { addDaysISO } from './date';
 // ─── helpers ───
 const rand = <T,>(arr: T[]): T | undefined => arr[Math.floor(Math.random() * arr.length)];
 const pool = (dishes: Dish[], cat: MealType, diet?: DietType): Dish[] =>
-  dishes.filter((d) => d.type === cat && (!diet || d.diet === diet));
+  dishes.filter((d) => d.types.includes(cat) && (!diet || d.diet === diet));
 const SIDE_RE = /fry|bhindi|brinjal|parwal|kundru|poi|cabbage/i;
 
 export function isBatterDish(name: string): boolean {
@@ -34,7 +34,7 @@ function fillSlot(
 
   switch (category) {
     case 'Early Morning': {
-      const nuts = dishes.find((d) => /almond|walnut/i.test(d.name) && d.type === 'Early Morning');
+      const nuts = dishes.find((d) => /almond|walnut/i.test(d.name) && d.types.includes('Early Morning'));
       const water = rand(pool(dishes, 'Early Morning').filter((d) => !/almond|walnut/i.test(d.name)));
       inst(nuts); inst(water);
       break;

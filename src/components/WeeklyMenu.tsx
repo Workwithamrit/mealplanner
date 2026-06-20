@@ -11,7 +11,7 @@ import { generateWeek, generateOneDay, dayPersonMacros } from '@/lib/meal-logic'
 import { smartFillDay, generateDishByName } from '@/lib/ai';
 import { cn, isVegName } from '@/lib/utils';
 import {
-  type DietType, type Dish, type DailyMenu, type MealPlanDish, type MealSlot, type DayMeals, type Macros, type Person, ZERO_MACROS,
+  type DietType, type Dish, type DailyMenu, type MealPlanDish, type MealSlot, type MealType, type DayMeals, type Macros, type Person, ZERO_MACROS,
 } from '@/types';
 import { weekDatesFrom, shiftWeek, weekStartSunday, todayISO, formatDayLabel, formatDayShort, formatDayNum, dayBadge, isTodayISO } from '@/lib/date';
 
@@ -112,10 +112,10 @@ export default function WeeklyMenu() {
     }
   };
 
-  const resolveDish = (name: string, category: Dish['type']): Dish => {
+  const resolveDish = (name: string, categories: MealType[]): Dish => {
     const existing = dishes.find((d) => d.name.toLowerCase() === name.toLowerCase());
     if (existing) return existing;
-    const created = addDish({ name, type: category, diet: isVegName(name) ? 'Veg' : 'Non-Veg', accompaniments: '', macros: { ...ZERO_MACROS }, ingredients: [], instructions: [] });
+    const created = addDish({ name, types: categories.length ? categories : ['Lunch'], diet: isVegName(name) ? 'Veg' : 'Non-Veg', accompaniments: '', macros: { ...ZERO_MACROS }, ingredients: [], instructions: [] });
     logActivity('Added dish to bank', name);
     return created;
   };
@@ -126,8 +126,8 @@ export default function WeeklyMenu() {
   const submitAdd = () => {
     if (!addTarget || !addValue.trim() || addSlots.size === 0) return;
     const slotIds = Array.from(addSlots);
-    const firstSlot = slots.find((s) => slotIds.includes(s.id));
-    const dish = resolveDish(addValue.trim(), firstSlot?.category ?? 'Lunch');
+    const categories = Array.from(new Set(slots.filter((s) => slotIds.includes(s.id)).map((s) => s.category)));
+    const dish = resolveDish(addValue.trim(), categories);
     addDishToMeals(addTarget.date, slotIds, dish);
     const slotLabels = slots.filter((s) => slotIds.includes(s.id)).map((s) => s.label).join(', ');
     logActivity('Added to plan', `${dish.name} → ${formatDayLabel(addTarget.date)} (${slotLabels})`);
@@ -138,7 +138,7 @@ export default function WeeklyMenu() {
   const submitReplace = () => {
     if (!replaceTarget || !replaceValue.trim()) return;
     const slot = slots.find((s) => s.id === replaceTarget.slotId);
-    const dish = resolveDish(replaceValue.trim(), slot?.category ?? 'Lunch');
+    const dish = resolveDish(replaceValue.trim(), slot ? [slot.category] : ['Lunch']);
     setReplacement(replaceTarget.date, replaceTarget.slotId, replaceTarget.id, dish.name, dish.macros);
     logActivity('Marked actual', `Had ${dish.name} instead (${formatDayLabel(replaceTarget.date)})`);
     setReplaceTarget(null); setReplaceValue('');
@@ -181,10 +181,10 @@ export default function WeeklyMenu() {
         </div>
       </div>
 
-      {/* Desktop — full week, card grid, no horizontal scroll (#7) */}
-      <div className="hidden lg:grid grid-cols-7 gap-3">
+      {/* Wide desktop (≥2xl) — full week, no-scroll 7-col grid, room to breathe */}
+      <div className="hidden 2xl:grid grid-cols-7 gap-4">
         {weekDates.map((date) => (
-          <DayCard key={date} date={date} day={dayOrSkeleton(byDate, date)} slots={slots} mobile={false} busy={busyDate === date}
+          <DayCard key={date} date={date} day={dayOrSkeleton(byDate, date)} slots={slots} compact busy={busyDate === date}
             onDietChange={(diet) => onDietChange(date, diet)}
             onAiFill={() => aiFillDay(date, dayOrSkeleton(byDate, date).diet)}
             onAddTarget={(slotId) => openAdd(date, slotId)}
@@ -194,6 +194,24 @@ export default function WeeklyMenu() {
             onReplace={(slotId, id) => openReplace(date, slotId, id)}
             onExternal={(slot, dish) => setExtTarget({ date, slot, dish })}
           />
+        ))}
+      </div>
+
+      {/* Laptop/tablet (lg–2xl) — horizontal scroll of full-size cards, no squeeze (#4) */}
+      <div className="hidden lg:flex 2xl:hidden overflow-x-auto snap-x snap-mandatory gap-4 pb-2">
+        {weekDates.map((date) => (
+          <div key={date} className="w-[300px] shrink-0 snap-start">
+            <DayCard date={date} day={dayOrSkeleton(byDate, date)} slots={slots} compact={false} busy={busyDate === date}
+              onDietChange={(diet) => onDietChange(date, diet)}
+              onAiFill={() => aiFillDay(date, dayOrSkeleton(byDate, date).diet)}
+              onAddTarget={(slotId) => openAdd(date, slotId)}
+              onRemove={(slotId, dish) => removeFromPlan(date, slotId, dish)}
+              onPortion={(slotId, id, p) => setPortion(date, slotId, id, p)}
+              onToggleSkip={(slotId, dish) => cycleSkip(date, slotId, dish)}
+              onReplace={(slotId, id) => openReplace(date, slotId, id)}
+              onExternal={(slot, dish) => setExtTarget({ date, slot, dish })}
+            />
+          </div>
         ))}
       </div>
 
@@ -211,10 +229,10 @@ export default function WeeklyMenu() {
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
-        <div className="flex overflow-x-auto snap-x snap-mandatory gap-3 px-[12%] pb-2 no-scrollbar">
+        <div className="flex overflow-x-auto snap-x snap-mandatory gap-3 px-[6%] sm:px-[12%] pb-2 no-scrollbar">
           {weekDates.map((date) => (
-            <div key={date} ref={(el) => { dayRefs.current[date] = el; }} className="w-[76%] sm:w-[55%] shrink-0 snap-center">
-              <DayCard date={date} day={dayOrSkeleton(byDate, date)} slots={slots} mobile busy={busyDate === date}
+            <div key={date} ref={(el) => { dayRefs.current[date] = el; }} className="w-[88%] sm:w-[65%] shrink-0 snap-center">
+              <DayCard date={date} day={dayOrSkeleton(byDate, date)} slots={slots} compact={false} busy={busyDate === date}
                 onDietChange={(diet) => onDietChange(date, diet)}
                 onAiFill={() => aiFillDay(date, dayOrSkeleton(byDate, date).diet)}
                 onAddTarget={(slotId) => openAdd(date, slotId)}
@@ -288,8 +306,8 @@ export default function WeeklyMenu() {
   );
 }
 
-function DayCard({ date, day, slots, mobile, busy, onDietChange, onAiFill, onAddTarget, onRemove, onPortion, onToggleSkip, onReplace, onExternal }: {
-  date: string; day: DailyMenu; slots: MealSlot[]; mobile: boolean; busy: boolean;
+function DayCard({ date, day, slots, compact, busy, onDietChange, onAiFill, onAddTarget, onRemove, onPortion, onToggleSkip, onReplace, onExternal }: {
+  date: string; day: DailyMenu; slots: MealSlot[]; compact: boolean; busy: boolean;
   onDietChange: (diet: DietType) => void; onAiFill: () => void; onAddTarget: (slotId: string) => void;
   onRemove: (slotId: string, dish: MealPlanDish) => void; onPortion: (slotId: string, id: string, p: string) => void;
   onToggleSkip: (slotId: string, dish: MealPlanDish) => void; onReplace: (slotId: string, id: string) => void;
@@ -301,24 +319,24 @@ function DayCard({ date, day, slots, mobile, busy, onDietChange, onAiFill, onAdd
   const people = Object.keys(personTotals) as Person[];
 
   return (
-    <div className={cn('rounded-2xl border bg-white flex flex-col gap-3 min-w-0', mobile ? 'p-4' : 'p-3', today ? 'border-emerald-300 ring-1 ring-emerald-100' : 'border-slate-200')}>
+    <div className={cn('rounded-2xl border bg-white flex flex-col gap-3 min-w-0', compact ? 'p-3.5' : 'p-4', today ? 'border-emerald-300 ring-1 ring-emerald-100' : 'border-slate-200')}>
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="font-display font-semibold text-slate-800 text-sm truncate">{mobile ? formatDayLabel(date) : formatDayShort(date)}</div>
-          <div className="text-[10px] text-slate-400 flex items-center gap-1">
-            {!mobile && <span>{formatDayNum(date)}</span>}
+          <div className="font-display font-semibold text-slate-800 text-sm truncate">{compact ? formatDayShort(date) : formatDayLabel(date)}</div>
+          <div className="text-xs text-slate-400 flex items-center gap-1">
+            {compact && <span>{formatDayNum(date)}</span>}
             {badge && <span className="font-semibold uppercase text-emerald-600">{badge}</span>}
           </div>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <select value={day.diet} onChange={(e) => onDietChange(e.target.value as DietType)}
-            className={cn('text-[11px] font-semibold uppercase tracking-wide px-2 rounded border bg-white', mobile ? 'min-h-12 py-2' : 'py-1', day.diet === 'Veg' ? 'text-emerald-700 border-emerald-200' : 'text-red-700 border-red-200')}>
+            className={cn('text-xs font-semibold uppercase tracking-wide px-2 rounded border bg-white', compact ? 'py-1' : 'min-h-12 py-2', day.diet === 'Veg' ? 'text-emerald-700 border-emerald-200' : 'text-red-700 border-red-200')}>
             <option value="Veg">Veg</option>
             <option value="Non-Veg">Non-Veg</option>
           </select>
           <button title="AI smart-fill this day" onClick={onAiFill} disabled={busy}
-            className={cn('rounded border border-slate-200 text-violet-600 hover:bg-violet-50 disabled:opacity-50 flex items-center justify-center flex-shrink-0', mobile ? 'w-12 h-12' : 'p-1.5')}>
-            <Sparkles className={cn(mobile ? 'w-4 h-4' : 'w-3.5 h-3.5', busy && 'animate-pulse')} />
+            className={cn('rounded border border-slate-200 text-violet-600 hover:bg-violet-50 disabled:opacity-50 flex items-center justify-center flex-shrink-0', compact ? 'p-1.5' : 'w-12 h-12')}>
+            <Sparkles className={cn(compact ? 'w-3.5 h-3.5' : 'w-4 h-4', busy && 'animate-pulse')} />
           </button>
         </div>
       </div>
@@ -330,14 +348,14 @@ function DayCard({ date, day, slots, mobile, busy, onDietChange, onAiFill, onAdd
           return (
             <div key={slot.id}>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">{slot.label}</span>
-                <span className={cn('flex items-center gap-0.5 text-[10px]', slotPeople.length > 2 ? 'text-amber-600' : 'text-slate-300')} title={slotPeople.join(', ')}>
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">{slot.label}</span>
+                <span className={cn('flex items-center gap-0.5 text-xs', slotPeople.length > 2 ? 'text-amber-600' : 'text-slate-300')} title={slotPeople.join(', ')}>
                   <Users className="w-3 h-3" />{slotPeople.length}
                 </span>
               </div>
               <div className="flex flex-col gap-1.5">
                 {list.map((dish) => (
-                  <PlanChip key={dish.id} dish={dish} large={mobile} portionListId="portion-suggestions"
+                  <PlanChip key={dish.id} dish={dish} large={!compact} portionListId="portion-suggestions"
                     onRemove={() => onRemove(slot.id, dish)}
                     onPortion={(p) => onPortion(slot.id, dish.id, p)}
                     onToggleSkip={() => onToggleSkip(slot.id, dish)}
@@ -346,8 +364,8 @@ function DayCard({ date, day, slots, mobile, busy, onDietChange, onAiFill, onAdd
                   />
                 ))}
                 <button onClick={() => onAddTarget(slot.id)}
-                  className={cn('flex items-center justify-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg border border-dashed border-slate-200',
-                    mobile ? 'min-h-12 py-2' : 'py-1.5')}>
+                  className={cn('flex items-center justify-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg border border-dashed border-slate-200',
+                    compact ? 'py-1.5' : 'min-h-12 py-2')}>
                   <Plus className="w-3.5 h-3.5" /> Add
                 </button>
               </div>
@@ -361,7 +379,7 @@ function DayCard({ date, day, slots, mobile, busy, onDietChange, onAiFill, onAdd
           {people.map((p) => {
             const m = personTotals[p] as Macros;
             return (
-              <div key={p} className="text-[10px] bg-slate-50 rounded-lg px-2 py-1.5">
+              <div key={p} className="text-xs bg-slate-50 rounded-lg px-2 py-1.5">
                 <span className="font-semibold text-slate-700">{p}</span>
                 <div className="text-slate-500 tabular-nums leading-snug">{Math.round(m.calories)} kcal · {Math.round(m.protein)}P · {Math.round(m.carbs)}C · {Math.round(m.fat)}F</div>
               </div>
@@ -382,32 +400,32 @@ function PlanChip({ dish, large, portionListId, onRemove, onPortion, onToggleSki
   const external = dish.status === 'ordered' || dish.status === 'outside';
   const replaced = dish.status === 'replaced';
   return (
-    <div className={cn('group rounded-lg border text-xs relative', large ? 'p-2.5' : 'p-1.5', veg ? 'bg-[var(--veg)] border-[var(--veg-border)]' : 'bg-[var(--nonveg)] border-[var(--nonveg-border)]', skipped && 'opacity-50')}>
+    <div className={cn('group rounded-lg border text-[13px] relative', large ? 'p-3' : 'p-2', veg ? 'bg-[var(--veg)] border-[var(--veg-border)]' : 'bg-[var(--nonveg)] border-[var(--nonveg-border)]', skipped && 'opacity-50')}>
       <div className="flex items-start gap-2">
         <button onClick={onToggleSkip} title={skipped ? 'Skipped — tap to restore' : 'Eaten as planned — tap to skip'}
-          className={cn('rounded border flex items-center justify-center flex-shrink-0', large ? 'w-12 h-12' : 'w-3.5 h-3.5 mt-0.5', skipped ? 'bg-white border-slate-300' : 'bg-emerald-500 border-emerald-500')}>
-          {skipped ? <Ban className={large ? 'w-5 h-5 text-slate-400' : 'w-2.5 h-2.5 text-slate-400'} /> : <Check className={large ? 'w-5 h-5 text-white' : 'w-2.5 h-2.5 text-white'} />}
+          className={cn('rounded border flex items-center justify-center flex-shrink-0', large ? 'w-12 h-12' : 'w-4 h-4 mt-0.5', skipped ? 'bg-white border-slate-300' : 'bg-emerald-500 border-emerald-500')}>
+          {skipped ? <Ban className={large ? 'w-5 h-5 text-slate-400' : 'w-3 h-3 text-slate-400'} /> : <Check className={large ? 'w-5 h-5 text-white' : 'w-3 h-3 text-white'} />}
         </button>
         <div className="min-w-0 flex-1">
-          <div className={cn('font-medium text-slate-800 leading-tight flex items-center gap-1', large && 'text-sm', skipped && 'line-through')}>
-            <span className="truncate">{dish.name}</span>
-            {dish.isDessert && <span title="Dessert" className="flex-shrink-0">🍰</span>}
+          <div className={cn('font-medium text-slate-800 leading-snug flex items-start gap-1', large && 'text-sm', skipped && 'line-through')}>
+            <span className="break-words">{dish.name}</span>
+            {dish.types?.includes('Dessert') && <span title="Dessert" className="flex-shrink-0">🍰</span>}
           </div>
-          {dish.accompaniments && <div className="text-[10px] text-slate-500 italic leading-tight">w/ {dish.accompaniments}</div>}
-          {replaced && dish.actualName && <div className="text-[10px] text-amber-600 leading-tight">→ had: {dish.actualName}</div>}
-          {external && dish.actualName && <div className="text-[10px] text-sky-600 leading-tight">→ {dish.status === 'ordered' ? 'ordered' : 'ate out'}: {dish.actualName}</div>}
+          {dish.accompaniments && <div className="text-xs text-slate-500 italic leading-snug mt-0.5">w/ {dish.accompaniments}</div>}
+          {replaced && dish.actualName && <div className="text-xs text-amber-600 leading-snug mt-0.5">→ had: {dish.actualName}</div>}
+          {external && dish.actualName && <div className="text-xs text-sky-600 leading-snug mt-0.5">→ {dish.status === 'ordered' ? 'ordered' : 'ate out'}: {dish.actualName}</div>}
           <input list={portionListId} value={dish.portion ?? ''} onChange={(e) => onPortion(e.target.value)} placeholder="+ portion"
-            className={cn('mt-1 w-full bg-white/70 border border-white rounded px-1.5 text-slate-600 placeholder:text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-400', large ? 'min-h-12 text-xs' : 'py-0.5 text-[10px]')} />
+            className={cn('mt-1.5 w-full bg-white/70 border border-white rounded px-1.5 text-slate-600 placeholder:text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-400', large ? 'min-h-12 text-xs' : 'py-1 text-xs')} />
         </div>
         <div className="flex flex-col gap-1 flex-shrink-0">
-          <button onClick={onReplace} title="Had something else" className={cn('flex items-center justify-center text-slate-400 hover:text-amber-500', large ? 'w-12 h-12' : 'w-3 h-3')}>
-            <Replace className={large ? 'w-4 h-4' : 'w-3 h-3'} />
+          <button onClick={onReplace} title="Had something else" className={cn('flex items-center justify-center text-slate-400 hover:text-amber-500', large ? 'w-12 h-12' : 'w-4 h-4')}>
+            <Replace className={large ? 'w-4 h-4' : 'w-3.5 h-3.5'} />
           </button>
-          <button onClick={onExternal} title="Ordered in / ate outside" className={cn('flex items-center justify-center text-slate-400 hover:text-sky-500', large ? 'w-12 h-12' : 'w-3 h-3')}>
-            <Store className={large ? 'w-4 h-4' : 'w-3 h-3'} />
+          <button onClick={onExternal} title="Ordered in / ate outside" className={cn('flex items-center justify-center text-slate-400 hover:text-sky-500', large ? 'w-12 h-12' : 'w-4 h-4')}>
+            <Store className={large ? 'w-4 h-4' : 'w-3.5 h-3.5'} />
           </button>
-          <button onClick={onRemove} title="Remove" className={cn('flex items-center justify-center text-slate-400 hover:text-red-500', large ? 'w-12 h-12' : 'w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity')}>
-            <Trash2 className={large ? 'w-4 h-4' : 'w-3 h-3'} />
+          <button onClick={onRemove} title="Remove" className={cn('flex items-center justify-center text-slate-400 hover:text-red-500', large ? 'w-12 h-12' : 'w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity')}>
+            <Trash2 className={large ? 'w-4 h-4' : 'w-3.5 h-3.5'} />
           </button>
         </div>
       </div>
