@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+:root {
+  --veg: #ebfbf3;
+  --veg-border: #a7f3d0;
+  --nonveg: #fff0f0;
+  --nonveg-border: #fecaca;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
